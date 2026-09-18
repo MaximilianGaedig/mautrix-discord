@@ -55,6 +55,10 @@ type BridgeConfig struct {
 	FederateRooms               bool `yaml:"federate_rooms"`
 	PrefixWebhookMessages       bool `yaml:"prefix_webhook_messages"`
 	EnableWebhookAvatars        bool `yaml:"enable_webhook_avatars"`
+
+	PresenceBridging       bool    `yaml:"presence_bridging"`
+	PresenceRefreshSeconds int     `yaml:"presence_refresh_seconds"`
+	PresenceMaxPerSecond   float64 `yaml:"presence_max_per_second"`
 	UseDiscordCDNUpload         bool `yaml:"use_discord_cdn_upload"`
 	ForbidDMingStrangers        bool `yaml:"forbid_dming_strangers"`
 

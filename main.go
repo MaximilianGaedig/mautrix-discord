@@ -31,6 +31,7 @@ import (
 
 	"go.mau.fi/mautrix-discord/config"
 	"go.mau.fi/mautrix-discord/database"
+	"go.mau.fi/mautrix-discord/presence"
 )
 
 // Information to find out exactly which commit the bridge was built from.
@@ -74,6 +75,7 @@ type DiscordBridge struct {
 	guildsLock   sync.Mutex
 
 	puppets             map[string]*Puppet
+	presence            *presence.Manager
 	puppetsByCustomMXID map[id.UserID]*Puppet
 	puppetsLock         sync.Mutex
 
@@ -112,6 +114,7 @@ func (br *DiscordBridge) Start() {
 		br.AS.Router.HandleFunc("/mautrix-discord/avatar/{server}/{mediaID}/{checksum}", br.serveMediaProxy).Methods(http.MethodGet)
 	}
 	br.DMA = newDirectMediaAPI(br)
+	br.startPresence()
 	br.WaitWebsocketConnected()
 	go br.startUsers()
 }

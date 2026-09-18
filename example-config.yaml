@@ -167,6 +167,17 @@ bridge:
     prefix_webhook_messages: true
     # Bridge webhook avatars?
     enable_webhook_avatars: false
+    # Should Discord online status be bridged to Matrix presence on puppets?
+    # Only works with user token logins: Discord sends presences of friends (and of members in guild
+    # member lists the client is subscribed to) to user accounts. Bot logins would need the privileged
+    # GUILD_PRESENCES intent, which the bridge doesn't request. This is passive and doesn't change
+    # your own status on Discord. Idle is bridged as unavailable, do not disturb as online.
+    presence_bridging: true
+    # How often to re-send "online" while the user is still online on Discord. Must be lower than the
+    # homeserver's idle timeout (tuwunel: presence_idle_timeout_s, Synapse: 5 minutes).
+    presence_refresh_seconds: 240
+    # Global limit of presence requests per second sent to the homeserver.
+    presence_max_per_second: 5
     # Should the bridge upload media to the Discord CDN directly before sending the message when using a user token,
     # like the official client does? The other option is sending the media in the message send request as a form part
     # (which is always used by bots and webhooks).

@@ -665,8 +665,17 @@ func (user *User) eventHandler(rawEvt any) {
 		}
 	}()
 	switch evt := rawEvt.(type) {
+	case *discordgo.PresenceUpdate:
+		user.bridge.handleDiscordPresence(evt.User, evt.Status)
+	case *discordgo.Event:
+		if evt.Type == "READY_SUPPLEMENTAL" {
+			user.bridge.handleReadySupplementalPresences(evt.RawData)
+		}
 	case *discordgo.Ready:
 		user.readyHandler(evt)
+		for _, p := range evt.Presences {
+			user.bridge.handleDiscordPresence(p.User, p.Status)
+		}
 	case *discordgo.Resumed:
 		user.resumeHandler(evt)
 	case *discordgo.Connect:
@@ -723,8 +732,6 @@ func (user *User) eventHandler(rawEvt any) {
 		user.interactionSuccessHandler(evt)
 	case *discordgo.ThreadListSync:
 		user.threadListSyncHandler(evt)
-	case *discordgo.Event:
-		// Ignore
 	default:
 		user.log.Debug().Type("event_type", evt).Msg("Unhandled event")
 	}

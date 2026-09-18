@@ -98,6 +98,23 @@ func (br *DiscordBridge) GetPuppetByID(id string) *Puppet {
 	return puppet
 }
 
+// GetExistingPuppetByID returns the puppet only if it's already in the cache or database.
+func (br *DiscordBridge) GetExistingPuppetByID(id string) *Puppet {
+	br.puppetsLock.Lock()
+	defer br.puppetsLock.Unlock()
+
+	puppet, ok := br.puppets[id]
+	if !ok {
+		dbPuppet := br.DB.Puppet.Get(id)
+		if dbPuppet == nil {
+			return nil
+		}
+		puppet = br.NewPuppet(dbPuppet)
+		br.puppets[puppet.ID] = puppet
+	}
+	return puppet
+}
+
 func (br *DiscordBridge) GetPuppetByCustomMXID(mxid id.UserID) *Puppet {
 	br.puppetsLock.Lock()
 	defer br.puppetsLock.Unlock()
