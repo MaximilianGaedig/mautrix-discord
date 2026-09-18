@@ -285,6 +285,7 @@ func (portal *Portal) convertDiscordMessage(ctx context.Context, puppet *Puppet,
 	}
 	log := zerolog.Ctx(ctx)
 	handledIDs := make(map[string]struct{})
+	var attachmentParts []*ConvertedMessage
 	for _, att := range msg.Attachments {
 		if _, handled := handledIDs[att.ID]; handled {
 			continue
@@ -293,8 +294,11 @@ func (portal *Portal) convertDiscordMessage(ctx context.Context, puppet *Puppet,
 		log := log.With().Str("attachment_id", att.ID).Logger()
 		if part := portal.convertDiscordAttachment(log.WithContext(ctx), intent, msg.ID, att); part != nil {
 			parts = append(parts, part)
+			attachmentParts = append(attachmentParts, part)
 		}
 	}
+	// Mark multi-attachment messages so Matrix clients can group them.
+	tagAlbum(attachmentParts, discordAlbumID(msg.ID))
 	for _, sticker := range msg.StickerItems {
 		if _, handled := handledIDs[sticker.ID]; handled {
 			continue
