@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix"
@@ -57,6 +58,11 @@ const rtcDeviceID = "DISCORDBRIDGE"
 // voiceJoinTimeout bounds the Discord voice handshake, which can hang rather than fail when the
 // voice gateway is unhappy.
 const voiceJoinTimeout = 30 * time.Second
+
+// rtpSource is the reading half of a remote audio track, so the pump can be driven by a test.
+type rtpSource interface {
+	ReadRTP() (*rtp.Packet, interceptor.Attributes, error)
+}
 
 // voiceCall is one bridged voice channel.
 type voiceCall struct {
@@ -291,6 +297,15 @@ func (c *voiceCall) writeDiscord(conn *discordgo.VoiceConnection) {
 		}
 		return
 	}
+	c.pumpToDiscord(track, conn.OpusSend)
+}
+
+// pumpToDiscord carries a Matrix audio track into Discord's outgoing frame channel.
+//
+// Split from writeDiscord so it can be driven without a Discord connection: OpusSend is just a
+// channel, so this half of the bridge can be tested against a real Matrix track and a channel the
+// test reads, which is everything except Discord's own socket.
+func (c *voiceCall) pumpToDiscord(track rtpSource, out chan<- []byte) {
 	for c.ctx.Err() == nil {
 		packet, _, err := track.ReadRTP()
 		if err != nil {
@@ -305,7 +320,7 @@ func (c *voiceCall) writeDiscord(conn *discordgo.VoiceConnection) {
 		// Opus straight through: Discord wants the frame, not the packet, and both sides are
 		// already 48 kHz 20 ms.
 		select {
-		case conn.OpusSend <- packet.Payload:
+		case out <- packet.Payload:
 		case <-c.ctx.Done():
 			return
 		default:
