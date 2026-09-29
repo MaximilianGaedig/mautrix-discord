@@ -84,6 +84,7 @@ func (mc *MessageConverter) ToMatrix(
 	log := zerolog.Ctx(ctx)
 	handledIDs := make(exmaps.Set[string])
 
+	var attachmentParts []*bridgev2.ConvertedMessagePart
 	for _, att := range msg.Attachments {
 		if !handledIDs.Add(att.ID) {
 			continue
@@ -94,8 +95,11 @@ func (mc *MessageConverter) ToMatrix(
 		if part := mc.renderDiscordAttachment(log.WithContext(ctx), att, &mediaInfo); part != nil {
 			part.ID = discordid.MakePartID(att.ID)
 			parts = append(parts, part)
+			attachmentParts = append(attachmentParts, part)
 		}
 	}
+	// Mark multi-attachment messages so Matrix clients can group them.
+	tagAlbum(attachmentParts, discordAlbumID(msg.ID))
 
 	for _, sticker := range msg.StickerItems {
 		if !handledIDs.Add(sticker.ID) {
