@@ -22,6 +22,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/callbridge"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
@@ -38,6 +39,10 @@ type DiscordConnector struct {
 	MsgConv         *msgconv.MessageConverter
 	attachmentCache *attachmentCache
 	httpClient      *http.Client
+
+	// rtcFocus is the homeserver's LiveKit focus, discovered once and shared by every bridged
+	// voice channel: it is a property of the homeserver, not of a call.
+	rtcFocus callbridge.RTCFocus
 }
 
 var (
