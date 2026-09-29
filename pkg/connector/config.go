@@ -49,6 +49,10 @@ type Config struct {
 
 	LogWhenDroppingMessages bool `yaml:"log_when_dropping_messages"`
 
+	// VoiceBridging puts Discord voice channels into the room's Matrix call: the bridge joins the
+	// channel when a Matrix user joins the call, and publishes each Discord speaker as their ghost.
+	VoiceBridging bool `yaml:"voice_bridging"`
+
 	// Proxy is a static proxy address (HTTP or SOCKS5) for connecting to
 	// Discord. Ignored when GetProxyFrom is set.
 	Proxy string `yaml:"proxy"`
@@ -161,6 +165,7 @@ func upgradeConfig(helper up.Helper) {
 	helper.Copy(up.Bool, "custom_emoji_reactions")
 	helper.Copy(up.Bool, "per_message_profiles_on_every_message_hack")
 	helper.Copy(up.Bool, "log_when_dropping_messages")
+	helper.Copy(up.Bool, "voice_bridging")
 	helper.Copy(up.Str, "proxy")
 	helper.Copy(up.Str, "get_proxy_from")
 	helper.Copy(up.Bool, "proxy_media")

@@ -74,6 +74,8 @@ func (d *DiscordConnector) Start(ctx context.Context) error {
 		return err
 	}
 
+	d.registerVoiceHandlers()
+
 	log.Debug().Msg("Setting up provisioning API")
 
 	err = d.setUpProvisioningAPIs()

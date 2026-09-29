@@ -45,6 +45,11 @@ per_message_profiles_on_every_message_hack: false
 # only includes metadata such as channel and message ID.
 log_when_dropping_messages: true
 
+# Put Discord voice channels into the room's Matrix call. The bridge joins the voice
+# channel when a Matrix user joins the room's call, and publishes each Discord speaker as
+# their own ghost participant. Audio only.
+voice_bridging: false
+
 # Static proxy address (HTTP or SOCKS5) for connecting to Discord.
 proxy:
 # HTTP endpoint to request a new proxy address from, for dynamically assigned

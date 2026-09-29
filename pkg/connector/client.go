@@ -50,6 +50,7 @@ type DiscordClient struct {
 	UserLogin  *bridgev2.UserLogin
 	Session    *discordgo.Session
 	httpClient *http.Client
+	voiceCalls *voiceCalls
 
 	stopConnecting atomic.Pointer[context.CancelFunc]
 	fullSyncDone   atomic.Bool // inverted (i.e. not needsInitSync) so zero value is "correct"
@@ -113,6 +114,7 @@ func (d *DiscordConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 		httpClient:    d.Bridge.GetHTTPClientSettings().Compile(),
 		userCache:     NewUserCache(session),
 		voice:         newVoiceChannels(),
+		voiceCalls:    newVoiceCalls(),
 		guildSettings: make(map[string]*discordgo.UserGuildSettings),
 		readStates:    make(map[string]*discordgo.ReadState),
 		relationships: make(map[string]*discordgo.Relationship),
@@ -431,6 +433,11 @@ func (d *DiscordClient) applySingleGuildSettings(s *discordgo.UserGuildSettings)
 func (d *DiscordClient) Disconnect() {
 	if stopConnecting := d.stopConnecting.Swap(nil); stopConnecting != nil {
 		(*stopConnecting)()
+	}
+	// Bridged voice channels outlive the gateway otherwise: the voice connections would sit there
+	// with nothing driving them and the published memberships would never be cleared.
+	if calls := d.voiceCalls; calls != nil {
+		calls.stopAll()
 	}
 	d.UserLogin.Log.Info().Msg("Disconnecting session")
 	if d.Session != nil {
