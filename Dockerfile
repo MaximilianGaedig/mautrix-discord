@@ -4,7 +4,10 @@ RUN apk add --no-cache git ca-certificates build-base su-exec olm-dev
 
 COPY . /build
 WORKDIR /build
-RUN go build -o /usr/bin/mautrix-discord
+# The package path is given explicitly: this branch moved package main into ./cmd/mautrix-discord,
+# so building the repo root finds no Go files at all. build.sh cannot be used here either - it
+# appends "$@" after the package path, where go reads -o as another package to build.
+RUN go build -o /usr/bin/mautrix-discord ./cmd/mautrix-discord
 
 FROM alpine:3.24
 
