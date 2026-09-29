@@ -926,6 +926,8 @@ func (d *DiscordClient) handleDiscordEvent(rawEvt any) {
 			return
 		}
 		d.handleDiscordTyping(ctx, evt, route)
+	case *discordgo.VoiceStateUpdate:
+		d.handleVoiceStateUpdate(ctx, evt)
 	case *discordgo.GuildCreate:
 		if evt.Unavailable {
 			break

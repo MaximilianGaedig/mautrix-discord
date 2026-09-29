@@ -77,6 +77,10 @@ type DiscordClient struct {
 
 	userCache *UserCache
 
+	// Who is in which voice channel, kept because the gateway reports a move as a single update
+	// naming only the new channel (voicestate.go).
+	voice *voiceChannels
+
 	lastSendAttemptMutex sync.Mutex
 	lastSendAttempt      *SendAttempt
 
@@ -108,6 +112,7 @@ func (d *DiscordConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 		// one is configured).
 		httpClient:    d.Bridge.GetHTTPClientSettings().Compile(),
 		userCache:     NewUserCache(session),
+		voice:         newVoiceChannels(),
 		guildSettings: make(map[string]*discordgo.UserGuildSettings),
 		readStates:    make(map[string]*discordgo.ReadState),
 		relationships: make(map[string]*discordgo.Relationship),
