@@ -9,11 +9,12 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/google/uuid v1.6.0
 	github.com/imroc/req/v3 v3.57.0
+	github.com/pion/interceptor v0.1.48
 	github.com/pion/rtp v1.10.5
 	github.com/refraction-networking/utls v1.8.2
 	github.com/rs/zerolog v1.35.1
 	github.com/yuin/goldmark v1.8.6
-	go.mau.fi/util v0.10.1
+	go.mau.fi/util v0.10.2-0.20260918225449-a4c0d5b86aa8
 	golang.org/x/net v0.59.0
 	golang.org/x/term v0.46.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -66,7 +67,6 @@ require (
 	github.com/pion/datachannel v1.6.2 // indirect
 	github.com/pion/dtls/v3 v3.1.8 // indirect
 	github.com/pion/ice/v4 v4.4.2 // indirect
-	github.com/pion/interceptor v0.1.48 // indirect
 	github.com/pion/logging v0.2.4 // indirect
 	github.com/pion/mdns/v2 v2.2.0 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
@@ -120,4 +120,4 @@ replace github.com/bwmarrin/discordgo => github.com/beeper/discordgo v0.0.0-2026
 
 replace github.com/imroc/req/v3 => github.com/beeper/req/v3 v3.0.0-20260808092153-100cef0a2fbd
 
-replace maunium.net/go/mautrix => github.com/MaximilianGaedig/mautrix-go v0.31.1-0.20260929122424-b73c299b34f4
+replace maunium.net/go/mautrix => github.com/MaximilianGaedig/mautrix-go v0.31.1-0.20260929162938-f0f02f158d54
