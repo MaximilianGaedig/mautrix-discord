@@ -922,6 +922,7 @@ func (d *DiscordClient) handleDiscordEvent(rawEvt any) {
 		// offline.
 		d.syncRemoteProfile(ctx)
 		go d.resyncGhostsFromReady(ctx, evt)
+		d.mirrorReadyBlocks(ctx, evt.Relationships)
 		d.refreshSafetyHub(ctx)
 		d.pokeVitals(ctx)
 		d.sendCurrentState(ctx) // (pokeVitals already enqueued a new bridge state but let's be explicit about it here.)
@@ -1175,10 +1176,13 @@ func (d *DiscordClient) handleDiscordEvent(rawEvt any) {
 	// coherence in the face of concurrency, because this method is always
 	// dispatched on a new goroutine.
 	case *discordgo.RelationshipAdd:
+		d.mirrorRelationshipBlock(ctx, evt.Relationship)
 		d.handleRelationshipNickChange(ctx, evt.ID, evt.Nickname)
 	case *discordgo.RelationshipUpdate:
+		d.mirrorRelationshipBlock(ctx, evt.Relationship)
 		d.handleRelationshipNickChange(ctx, evt.ID, evt.Nickname)
 	case *discordgo.RelationshipRemove:
+		d.mirrorRelationshipRemoved(ctx, evt.ID)
 		d.handleRelationshipNickChange(ctx, evt.ID, "")
 	case *discordgo.PresenceUpdate:
 		d.handlePresenceUpdate(ctx, evt)

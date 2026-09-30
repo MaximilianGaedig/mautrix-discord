@@ -52,6 +52,7 @@ type DiscordClient struct {
 	httpClient *http.Client
 	voiceCalls *voiceCalls
 	callLog    *callLogger
+	blocks     blockTracker
 
 	stopConnecting atomic.Pointer[context.CancelFunc]
 	fullSyncDone   atomic.Bool // inverted (i.e. not needsInitSync) so zero value is "correct"
