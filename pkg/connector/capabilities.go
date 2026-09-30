@@ -43,8 +43,21 @@ var DiscordGeneralCaps = &bridgev2.NetworkGeneralCapabilities{
 	AggressiveUpdateInfo: true,
 
 	Provisioning: bridgev2.ProvisioningCapabilities{
-		ResolveIdentifier: bridgev2.ResolveIdentifierCapabilities{},
-		GroupCreation:     map[string]bridgev2.GroupTypeCapabilities{},
+		ResolveIdentifier: bridgev2.ResolveIdentifierCapabilities{
+			CreateDM: true,
+			// Only friends and users already seen by the bridge can be
+			// found by name; Discord has no global username lookup.
+			LookupUsername: true,
+			ContactList:    true,
+			Search:         true,
+		},
+		GroupCreation: map[string]bridgev2.GroupTypeCapabilities{
+			"group_dm": {
+				TypeDescription: "Discord group DM",
+				Name:            bridgev2.GroupFieldCapability{Allowed: true, MaxLength: 100},
+				Participants:    bridgev2.GroupFieldCapability{Allowed: true, Required: true, MinLength: 2, MaxLength: maxGroupDMRecipients},
+			},
+		},
 	},
 }
 

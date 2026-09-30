@@ -212,3 +212,17 @@ func (uc *UserCache) Resolve(ctx context.Context, userID string) *discordgo.User
 
 	return user
 }
+
+// Snapshot returns all known (non-nil) users. The order is unspecified.
+func (uc *UserCache) Snapshot() []*discordgo.User {
+	uc.lock.Lock()
+	defer uc.lock.Unlock()
+
+	users := make([]*discordgo.User, 0, len(uc.cache))
+	for _, u := range uc.cache {
+		if u != nil {
+			users = append(users, u)
+		}
+	}
+	return users
+}
