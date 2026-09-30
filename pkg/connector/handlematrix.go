@@ -59,8 +59,21 @@ type SendAttempt struct {
 }
 
 func (d *DiscordClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.MatrixMessage) (*bridgev2.MatrixMessageResponse, error) {
+	resp, _, err := d.sendMatrixMessage(ctx, msg, func(ctx context.Context, channelID string, refererOpt discordgo.RequestOption) (*discordgo.MessageSend, error) {
+		return d.connector.MsgConv.ToDiscord(ctx, d.Session, msg, channelID, refererOpt)
+	})
+	return resp, err
+}
+
+// sendMatrixMessage sends a message that came from Matrix to Discord, with
+// the channel or thread it belongs in worked out. build makes the request.
+func (d *DiscordClient) sendMatrixMessage(
+	ctx context.Context,
+	msg *bridgev2.MatrixMessage,
+	build func(ctx context.Context, channelID string, refererOpt discordgo.RequestOption) (*discordgo.MessageSend, error),
+) (*bridgev2.MatrixMessageResponse, *discordgo.Message, error) {
 	if !d.IsLoggedIn() {
-		return nil, bridgev2.ErrNotLoggedIn
+		return nil, nil, bridgev2.ErrNotLoggedIn
 	}
 
 	log := zerolog.Ctx(ctx).With().Str("action", "matrix message send").Logger()
@@ -76,7 +89,7 @@ func (d *DiscordClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.M
 	if threadRootRemoteID != "" {
 		thread, err := d.getThreadByRootMessageID(ctx, threadRootRemoteID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if thread != nil {
 			threadChannelID = thread.ThreadChannelID
@@ -87,11 +100,11 @@ func (d *DiscordClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.M
 				// If creating the thread failed, try resolving it once more in case it already exists.
 				thread, err = d.getThreadByRootMessageID(ctx, threadRootRemoteID)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				} else if thread != nil {
 					threadChannelID = thread.ThreadChannelID
 				} else {
-					return nil, fmt.Errorf("failed to create Discord thread from Matrix message: %w", startErr)
+					return nil, nil, fmt.Errorf("failed to create Discord thread from Matrix message: %w", startErr)
 				}
 			}
 		}
@@ -107,12 +120,12 @@ func (d *DiscordClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.M
 	// Perform any required screening before making any requests to Discord at
 	// all (message conversion does).
 	if err := d.screenOutgoingMessage(ctx, ch); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	sendReq, err := d.connector.MsgConv.ToDiscord(ctx, d.Session, msg, channelID, refererOpt)
+	sendReq, err := build(ctx, channelID, refererOpt)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if sendReq.Reference != nil && sendReq.Reference.ChannelID == parentChannelID && threadChannelID != "" {
@@ -151,7 +164,7 @@ func (d *DiscordClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.M
 
 	sentMsg, err := d.Session.ChannelMessageSendComplex(channelID, sendReq, refererOpt, discordgo.WithContext(ctx))
 	if err != nil {
-		return nil, d.tryWrappingError(ctx, err)
+		return nil, nil, d.tryWrappingError(ctx, err)
 	}
 	sentMsgTimestamp, _ := discordgo.SnowflakeTimestamp(sentMsg.ID)
 	dbMessage := &database.Message{
@@ -165,7 +178,7 @@ func (d *DiscordClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.M
 
 	return &bridgev2.MatrixMessageResponse{
 		DB: dbMessage,
-	}, nil
+	}, sentMsg, nil
 }
 
 var errCannotDMStranger = errors.New("can't direct message a stranger")
@@ -348,6 +361,12 @@ func (d *DiscordClient) HandleMatrixReactionRemove(ctx context.Context, removal 
 func (d *DiscordClient) HandleMatrixMessageRemove(ctx context.Context, removal *bridgev2.MatrixMessageRemove) error {
 	if !d.IsLoggedIn() {
 		return bridgev2.ErrNotLoggedIn
+	}
+
+	if removal.TargetMessage != nil {
+		if handled, err := d.handlePollRowRemoval(ctx, removal); handled {
+			return err
+		}
 	}
 
 	guildID := removal.Portal.Metadata.(*discordid.PortalMetadata).GuildID

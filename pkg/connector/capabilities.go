@@ -24,6 +24,7 @@ import (
 	"maunium.net/go/mautrix/event"
 
 	"go.mau.fi/mautrix-discord/pkg/discordid"
+	"go.mau.fi/mautrix-discord/pkg/msgconv"
 )
 
 var DiscordGeneralCaps = &bridgev2.NetworkGeneralCapabilities{
@@ -52,7 +53,7 @@ func (d *DiscordConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilitie
 }
 
 func (d *DiscordConnector) GetBridgeInfoVersion() (info, caps int) {
-	return 1, 4
+	return 1, 5
 }
 
 /*func supportedIfFFmpeg() event.CapabilitySupportLevel {
@@ -63,7 +64,7 @@ func (d *DiscordConnector) GetBridgeInfoVersion() (info, caps int) {
 }*/
 
 func capID() string {
-	base := "fi.mau.discord.capabilities.2026_03_18"
+	base := "fi.mau.discord.capabilities.2026_09_30"
 	if ffmpeg.Supported() {
 		return base + "+ffmpeg"
 	}
@@ -165,9 +166,14 @@ var discordCaps = &event.RoomFeatures{
 			MaxSize:          MaxFileSize,
 		},
 	},
-	LocationMessage: event.CapLevelUnsupported,
-	MaxTextLength:   MaxTextLength,
-	Thread:          event.CapLevelPartialSupport,
+	// Discord polls: two to ten answers, and a single or a multiple choice.
+	Poll:                event.CapLevelFullySupported,
+	PollEnd:             event.CapLevelFullySupported,
+	PollMaxOptions:      msgconv.MaxPollAnswers,
+	PollOptionMaxLength: msgconv.MaxPollAnswerLength,
+	LocationMessage:     event.CapLevelUnsupported,
+	MaxTextLength:       MaxTextLength,
+	Thread:              event.CapLevelPartialSupport,
 }
 
 func (d *DiscordClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal) *event.RoomFeatures {

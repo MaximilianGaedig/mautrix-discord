@@ -27,6 +27,9 @@ func (d *DiscordConnector) GetDBMetaTypes() database.MetaTypes {
 		Portal: func() any {
 			return &discordid.PortalMetadata{}
 		},
+		Message: func() any {
+			return &discordid.MessageMetadata{}
+		},
 		UserLogin: func() any {
 			return &discordid.UserLoginMetadata{}
 		},

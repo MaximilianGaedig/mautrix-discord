@@ -68,6 +68,11 @@ func (mc *MessageConverter) ToMatrix(
 	ctx = context.WithValue(ctx, contextKeyIntent, intent)
 	ctx = context.WithValue(ctx, contextKeyPortal, portal)
 	ctx = context.WithValue(ctx, contextKeyDiscordClient, session)
+	if msg.Type == MessageTypePollResult {
+		// The "poll has ended" system message is bridged as the end of the
+		// poll itself, by whoever handles the event, not as a message.
+		return &bridgev2.ConvertedMessage{}
+	}
 	predictedLength := len(msg.Attachments) + len(msg.StickerItems)
 	if msg.Content != "" {
 		predictedLength++
@@ -75,6 +80,9 @@ func (mc *MessageConverter) ToMatrix(
 	parts := make([]*bridgev2.ConvertedMessagePart, 0, predictedLength)
 	if textPart := mc.renderDiscordTextMessage(ctx, intent, portal, msg, source); textPart != nil {
 		parts = append(parts, textPart)
+	}
+	if pollPart := renderDiscordPoll(msg.Poll); pollPart != nil {
+		parts = append(parts, pollPart)
 	}
 
 	ctx = zerolog.Ctx(ctx).With().
@@ -834,4 +842,27 @@ func (mc *MessageConverter) renderDiscordAttachment(
 	}
 
 	return part
+}
+
+// renderDiscordPoll converts the poll of a message to a poll start event.
+func renderDiscordPoll(poll *discordgo.Poll) *bridgev2.ConvertedMessagePart {
+	if poll == nil || len(poll.Answers) == 0 {
+		return nil
+	}
+	content, extra := PollToMatrix(poll)
+	answerIDs := make([]int, len(poll.Answers))
+	for i, answer := range poll.Answers {
+		answerIDs[i] = answer.AnswerID
+	}
+	return &bridgev2.ConvertedMessagePart{
+		ID:      discordid.MakePartID(PollPartID),
+		Type:    event.EventUnstablePollStart,
+		Content: content,
+		Extra:   extra,
+		DBMetadata: &discordid.MessageMetadata{Poll: &discordid.PollMetadata{
+			MaxSelections: PollMaxSelections(poll),
+			AnswerIDs:     answerIDs,
+			Ended:         PollEnded(poll),
+		}},
+	}
 }

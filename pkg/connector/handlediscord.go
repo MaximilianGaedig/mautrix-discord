@@ -36,6 +36,7 @@ import (
 	"go.mau.fi/util/variationselector"
 
 	"go.mau.fi/mautrix-discord/pkg/discordid"
+	"go.mau.fi/mautrix-discord/pkg/msgconv"
 	"go.mau.fi/mautrix-discord/pkg/router"
 )
 
@@ -756,7 +757,18 @@ func (d *DiscordClient) handleDiscordStateEvent(rawEvt any) {
 		// This will also kick off a full sync (if needed). Notably, without
 		// this line, fresh bridges would never perform an initial full sync.
 		d.pokeVitals(ctx)
+	case *discordgo.MessagePollVoteAdd:
+		d.handlePollVoteEvent(ctx, &pollVoteEvent{ChannelID: evt.ChannelID, MessageID: evt.MessageID, UserID: evt.UserID, AnswerID: evt.AnswerID, Add: true})
+	case *discordgo.MessagePollVoteRemove:
+		d.handlePollVoteEvent(ctx, &pollVoteEvent{ChannelID: evt.ChannelID, MessageID: evt.MessageID, UserID: evt.UserID, AnswerID: evt.AnswerID})
 	case *discordgo.MessageCreate:
+		if pollMsgID, isPollResult := msgconv.PollResultTarget(evt.Message); isPollResult {
+			// "The poll has ended" is bridged as the end of the poll, not as a message.
+			if bridged, route := d.channelIsBridged(ctx, evt.ChannelID); bridged {
+				d.queuePollEnd(ctx, route, pollMsgID, nil)
+			}
+			return
+		}
 		if evt.Author == nil {
 			return
 		}
@@ -1073,6 +1085,12 @@ func (d *DiscordClient) handleDiscordEvent(rawEvt any) {
 		ctx, log := messageCtx(ctx, evt.Message)
 		bridged, route := d.channelIsBridged(ctx, evt.ChannelID)
 		if !bridged {
+			return
+		}
+
+		if msgconv.PollEnded(evt.Poll) {
+			// Discord updates the message when its poll ends. Nothing else changed.
+			d.queuePollEnd(ctx, route, evt.ID, evt.Poll)
 			return
 		}
 

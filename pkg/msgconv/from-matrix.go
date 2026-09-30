@@ -207,6 +207,28 @@ func (mc *MessageConverter) ToDiscord(
 	return &req, nil
 }
 
+// PollToDiscord converts a Matrix poll start into a message that carries a
+// Discord poll.
+func (mc *MessageConverter) PollToDiscord(msg *bridgev2.MatrixPollStart) (*discordgo.MessageSend, error) {
+	poll, err := PollFromMatrix(msg.Content, PollDurationFromContent(msg.Event.Content.Raw))
+	if err != nil {
+		return nil, err
+	}
+	req := &discordgo.MessageSend{Poll: poll}
+	if msg.InputTransactionID != "" {
+		req.Nonce = string(msg.InputTransactionID)
+	} else {
+		req.Nonce = discordid.GenerateNonce()
+	}
+	if msg.ReplyTo != nil {
+		req.Reference = &discordgo.MessageReference{
+			ChannelID: discordid.ParseChannelPortalID(msg.ReplyTo.Room.ID),
+			MessageID: discordid.ParseMessageID(msg.ReplyTo.ID),
+		}
+	}
+	return req, nil
+}
+
 func (mc *MessageConverter) ConvertMatrixMessageContent(ctx context.Context, portal *bridgev2.Portal, content *event.MessageEventContent, allowedLinkPreviews []string) (string, *discordgo.MessageAllowedMentions) {
 	allowedMentions := &discordgo.MessageAllowedMentions{
 		Parse:       []discordgo.AllowedMentionType{},
