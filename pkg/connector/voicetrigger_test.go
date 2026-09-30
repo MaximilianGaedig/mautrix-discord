@@ -19,8 +19,8 @@ import (
 	"testing"
 
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/callbridge"
+	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/id"
 )
 

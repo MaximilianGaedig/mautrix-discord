@@ -226,7 +226,7 @@ func (d *DiscordClient) HandleMatrixPollEnd(ctx context.Context, msg *bridgev2.M
 		return nil
 	}
 	if discordid.ParseUserID(msg.Poll.SenderID) != d.ownUserID() {
-		return pollError(errors.New("Discord only lets the author of a poll end it"))
+		return pollError(errors.New("only the author of a poll can end it on Discord"))
 	}
 	channelID, referer, err := d.channelForMessage(ctx, msg.Portal, msg.Poll)
 	if err != nil {

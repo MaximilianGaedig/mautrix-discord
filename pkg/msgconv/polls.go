@@ -191,13 +191,13 @@ func PollEndToMatrix(pollEventID id.EventID, poll *discordgo.Poll) (*event.Messa
 		text += " Top answers: " + strings.Join(top, ", ")
 	}
 	return &event.MessageEventContent{
-			MsgType:   event.MsgText,
-			Body:      text,
-			RelatesTo: &event.RelatesTo{Type: event.RelReference, EventID: pollEventID},
-		}, map[string]any{
-			"org.matrix.msc3381.poll.end": map[string]any{},
-			"org.matrix.msc1767.text":     text,
-		}
+		MsgType:   event.MsgText,
+		Body:      text,
+		RelatesTo: &event.RelatesTo{Type: event.RelReference, EventID: pollEventID},
+	}, map[string]any{
+		"org.matrix.msc3381.poll.end": map[string]any{},
+		"org.matrix.msc1767.text":     text,
+	}
 }
 
 // PollResponseToMatrix is the content of an org.matrix.msc3381.poll.response
@@ -207,10 +207,10 @@ func PollResponseToMatrix(pollEventID id.EventID, answerIDs []string) (*event.Me
 		answerIDs = []string{}
 	}
 	return &event.MessageEventContent{
-			RelatesTo: &event.RelatesTo{Type: event.RelReference, EventID: pollEventID},
-		}, map[string]any{
-			"org.matrix.msc3381.poll.response": map[string]any{"answers": answerIDs},
-		}
+		RelatesTo: &event.RelatesTo{Type: event.RelReference, EventID: pollEventID},
+	}, map[string]any{
+		"org.matrix.msc3381.poll.response": map[string]any{"answers": answerIDs},
+	}
 }
 
 // PollDurationFromContent reads the duration of a Matrix poll in hours from
@@ -240,9 +240,9 @@ func PollFromMatrix(content *event.PollStartEventContent, durationHours int) (*d
 	case utf8.RuneCountInString(question) > MaxPollQuestionLength:
 		return nil, fmt.Errorf("the poll question is longer than Discord's limit of %d characters", MaxPollQuestionLength)
 	case len(start.Answers) < MinPollAnswers:
-		return nil, fmt.Errorf("Discord polls need at least %d answers", MinPollAnswers)
+		return nil, fmt.Errorf("polls on Discord need at least %d answers", MinPollAnswers)
 	case len(start.Answers) > MaxPollAnswers:
-		return nil, fmt.Errorf("Discord polls can have at most %d answers", MaxPollAnswers)
+		return nil, fmt.Errorf("polls on Discord can have at most %d answers", MaxPollAnswers)
 	case durationHours < 1 || durationHours > MaxPollDurationHours:
 		return nil, fmt.Errorf("the poll duration must be between 1 and %d hours", MaxPollDurationHours)
 	}

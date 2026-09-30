@@ -49,7 +49,7 @@ func portalChannelKind(meta *discordid.PortalMetadata) channelKind {
 	return kindOther
 }
 
-var errNotOnThisChannel = errors.New("Discord doesn't have that for this kind of channel")
+var errNotOnThisChannel = errors.New("this kind of channel doesn't have that on Discord")
 
 // editChannel changes channel fields. A map, not discordgo.ChannelEdit, because clearing a topic or an icon
 // has to send an empty value, which ChannelEdit's omitempty fields leave out.
