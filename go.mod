@@ -120,4 +120,4 @@ replace github.com/bwmarrin/discordgo => github.com/beeper/discordgo v0.0.0-2026
 
 replace github.com/imroc/req/v3 => github.com/beeper/req/v3 v3.0.0-20260808092153-100cef0a2fbd
 
-replace maunium.net/go/mautrix => github.com/MaximilianGaedig/mautrix-go v0.31.1-0.20260930000959-b49a2e5ee749
+replace maunium.net/go/mautrix => github.com/MaximilianGaedig/mautrix-go v0.31.1-0.20260930103535-f99c72a5515d

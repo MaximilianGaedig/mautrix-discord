@@ -1409,3 +1409,16 @@ func (d *DiscordClient) removeRelationship(userID string) {
 
 	delete(d.relationships, userID)
 }
+
+var _ bridgev2.ChatListSyncingNetworkAPI = (*DiscordClient)(nil)
+
+// SyncChatList runs the connect-time chat sync again: the DMs and group DMs, then every bridged guild,
+// creating rooms for any that have none (e.g. after delete-portal).
+func (d *DiscordClient) SyncChatList(ctx context.Context) error {
+	if !d.IsLoggedIn() {
+		return errors.New("not logged in to Discord")
+	}
+	d.syncPrivateChannels(ctx)
+	d.syncGuilds(ctx)
+	return nil
+}
