@@ -190,14 +190,16 @@ func PollEndToMatrix(pollEventID id.EventID, poll *discordgo.Poll) (*event.Messa
 	default:
 		text += " Top answers: " + strings.Join(top, ", ")
 	}
-	return &event.MessageEventContent{
+	content := &event.MessageEventContent{
 		MsgType:   event.MsgText,
 		Body:      text,
 		RelatesTo: &event.RelatesTo{Type: event.RelReference, EventID: pollEventID},
-	}, map[string]any{
+	}
+	extra := map[string]any{
 		"org.matrix.msc3381.poll.end": map[string]any{},
 		"org.matrix.msc1767.text":     text,
 	}
+	return content, extra
 }
 
 // PollResponseToMatrix is the content of an org.matrix.msc3381.poll.response
@@ -206,11 +208,13 @@ func PollResponseToMatrix(pollEventID id.EventID, answerIDs []string) (*event.Me
 	if answerIDs == nil {
 		answerIDs = []string{}
 	}
-	return &event.MessageEventContent{
+	content := &event.MessageEventContent{
 		RelatesTo: &event.RelatesTo{Type: event.RelReference, EventID: pollEventID},
-	}, map[string]any{
+	}
+	extra := map[string]any{
 		"org.matrix.msc3381.poll.response": map[string]any{"answers": answerIDs},
 	}
+	return content, extra
 }
 
 // PollDurationFromContent reads the duration of a Matrix poll in hours from
