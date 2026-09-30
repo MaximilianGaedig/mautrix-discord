@@ -171,10 +171,34 @@ var discordCaps = &event.RoomFeatures{
 }
 
 func (d *DiscordClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
+	caps := discordCaps.Clone()
 	if portal.Metadata.(*discordid.PortalMetadata).GuildID == "" {
-		caps := discordCaps.Clone()
 		caps.Thread = event.CapLevelUnsupported
-		return caps
 	}
-	return discordCaps
+	roomManagementCaps(caps, portalChannelKind(portal.Metadata.(*discordid.PortalMetadata)))
+	return caps
+}
+
+// roomManagementCaps says which room settings can be changed from Matrix (roommgmt.go).
+func roomManagementCaps(caps *event.RoomFeatures, kind channelKind) {
+	caps.ID += "+" + [...]string{"other", "dm", "group", "channel"}[kind]
+	switch kind {
+	case kindDM:
+		caps.DeleteChat = true
+	case kindGroupDM:
+		caps.State = event.StateFeatureMap{
+			event.StateRoomName.Type:   {Level: event.CapLevelFullySupported},
+			event.StateRoomAvatar.Type: {Level: event.CapLevelFullySupported},
+		}
+		caps.MemberActions = event.MemberFeatureMap{
+			event.MemberActionInvite: event.CapLevelFullySupported,
+			event.MemberActionKick:   event.CapLevelFullySupported,
+		}
+		caps.DeleteChat = true
+	case kindServerChannel:
+		caps.State = event.StateFeatureMap{
+			event.StateRoomName.Type: {Level: event.CapLevelFullySupported},
+			event.StateTopic.Type:    {Level: event.CapLevelFullySupported},
+		}
+	}
 }
