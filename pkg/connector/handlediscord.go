@@ -907,6 +907,8 @@ func (d *DiscordClient) handleDiscordEvent(rawEvt any) {
 	// can become noisy fast.
 
 	switch evt := rawEvt.(type) {
+	case *discordgo.Event:
+		d.handleCallEvent(ctx, evt)
 	case *discordgo.Ready:
 		log.Info().
 			Int("n_dms", len(evt.PrivateChannels)).
@@ -1063,6 +1065,11 @@ func (d *DiscordClient) handleDiscordEvent(rawEvt any) {
 			return
 		}
 
+		if evt.Message.Type == discordgo.MessageTypeCall {
+			// Logged as one entry that follows the call, from the raw event (see handleCallEvent).
+			return
+		}
+
 		if evt.Message.Type == discordgo.MessageTypeChannelPinnedMessage {
 			// "X pinned a message" says what the pins update (ChannelPinsUpdate) bridges as the room's pins.
 			return
@@ -1083,6 +1090,9 @@ func (d *DiscordClient) handleDiscordEvent(rawEvt any) {
 		d.UserLogin.Bridge.QueueRemoteEvent(d.UserLogin, &wrappedEvt)
 	case *discordgo.MessageUpdate:
 		ctx, log := messageCtx(ctx, evt.Message)
+		if evt.Message.Type == discordgo.MessageTypeCall {
+			return
+		}
 		bridged, route := d.channelIsBridged(ctx, evt.ChannelID)
 		if !bridged {
 			return

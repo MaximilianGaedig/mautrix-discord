@@ -51,6 +51,7 @@ type DiscordClient struct {
 	Session    *discordgo.Session
 	httpClient *http.Client
 	voiceCalls *voiceCalls
+	callLog    *callLogger
 
 	stopConnecting atomic.Pointer[context.CancelFunc]
 	fullSyncDone   atomic.Bool // inverted (i.e. not needsInitSync) so zero value is "correct"
@@ -119,6 +120,7 @@ func (d *DiscordConnector) LoadUserLogin(ctx context.Context, login *bridgev2.Us
 		readStates:    make(map[string]*discordgo.ReadState),
 		relationships: make(map[string]*discordgo.Relationship),
 	}
+	cl.callLog = newCallLogger(cl.ownUserID, cl.makeEventSenderWithID)
 	login.Client = &cl
 
 	if session != nil {
