@@ -963,6 +963,12 @@ func (d *DiscordClient) handleDiscordEvent(rawEvt any) {
 		if err := d.handleChannelCreate(ctx, evt); err != nil {
 			log.Err(err).Msg("Failed to handle channel create")
 		}
+	case *discordgo.ChannelPinsUpdate:
+		bridged, route := d.channelIsBridged(ctx, evt.ChannelID)
+		if !bridged {
+			return
+		}
+		d.handleDiscordPinsUpdate(ctx, evt, route)
 	case *discordgo.ChannelUpdate:
 		bridged, _ := d.channelIsBridged(ctx, evt.ID)
 		if !bridged {
@@ -1042,6 +1048,11 @@ func (d *DiscordClient) handleDiscordEvent(rawEvt any) {
 					Bool("from_thread_known", route != nil && route.FromThread != nil).
 					Msg("Dropping message for non-bridged channel")
 			}
+			return
+		}
+
+		if evt.Message.Type == discordgo.MessageTypeChannelPinnedMessage {
+			// "X pinned a message" says what the pins update (ChannelPinsUpdate) bridges as the room's pins.
 			return
 		}
 
