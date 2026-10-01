@@ -18,7 +18,9 @@ package connector
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/bwmarrin/discordgo"
 	"go.mau.fi/util/ffmpeg"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
@@ -84,12 +86,66 @@ func capID() string {
 	return base
 }
 
-// TODO: This limit is increased depending on user subscription status (Discord Nitro).
+// MaxTextLength and MaxFileSize are what an account without Nitro can send.
+// limitsFor says what a given account can send in a given server.
 const MaxTextLength = 2000
+const MaxFileSize = 10 * 1024 * 1024
 
-// TODO: This limit is increased depending on user subscription status (Discord Nitro).
-// TODO: Verify this figure (10 MiB).
-const MaxFileSize = 10485760
+// The limits below aren't in discordgo. They are the ones Discord documents
+// for its plans and server boost levels (Nitro: 500 MB uploads and 4000
+// character messages; Nitro Basic and Nitro Classic: 50 MB uploads; server
+// boost level 2: 50 MB, level 3: 100 MB), counted in MiB like the free limit
+// is, as Discord's own client does.
+const (
+	nitroMaxTextLength = 4000
+
+	nitroMaxFileSize      = 500 * 1024 * 1024
+	nitroBasicMaxFileSize = 50 * 1024 * 1024
+	boostTier2MaxFileSize = 50 * 1024 * 1024
+	boostTier3MaxFileSize = 100 * 1024 * 1024
+)
+
+// limitsFor returns the longest message and the largest file that an account
+// with the given subscription can send to a server with the given boost
+// level. Outside servers the level is PremiumTierNone.
+//
+// A boosted server raises the upload limit for everyone in it and Nitro raises
+// it for the account everywhere, so the larger of the two applies. Message
+// length only depends on the account.
+func limitsFor(premiumType discordgo.UserPremiumType, guildTier discordgo.PremiumTier) (maxTextLength int, maxFileSize int64) {
+	maxTextLength, maxFileSize = MaxTextLength, MaxFileSize
+	switch premiumType {
+	case discordgo.UserPremiumTypeNitro:
+		maxTextLength, maxFileSize = nitroMaxTextLength, nitroMaxFileSize
+	case discordgo.UserPremiumTypeNitroBasic, discordgo.UserPremiumTypeNitroClassic:
+		maxFileSize = nitroBasicMaxFileSize
+	}
+	// Level 1 doesn't raise the upload limit, and neither does a plan or a
+	// level this code doesn't know: too low a limit only refuses a file that
+	// would have gone through, too high a one lets a send fail on Discord.
+	switch guildTier {
+	case discordgo.PremiumTier2:
+		maxFileSize = max(maxFileSize, boostTier2MaxFileSize)
+	case discordgo.PremiumTier3:
+		maxFileSize = max(maxFileSize, boostTier3MaxFileSize)
+	}
+	return maxTextLength, maxFileSize
+}
+
+// applyLimits sets the limits of caps, and marks them in the ID when they
+// differ from the defaults: the ID is what decides whether a room's
+// capabilities are sent again.
+func applyLimits(caps *event.RoomFeatures, maxTextLength int, maxFileSize int64) {
+	if maxTextLength == MaxTextLength && maxFileSize == MaxFileSize {
+		return
+	}
+	caps.ID += fmt.Sprintf("+text%d+file%d", maxTextLength, maxFileSize)
+	caps.MaxTextLength = maxTextLength
+	for _, file := range caps.File {
+		file.MaxCaptionLength = maxTextLength
+		file.MaxSize = maxFileSize
+	}
+}
 
 var discordCaps = &event.RoomFeatures{
 	ID:       capID(),
@@ -190,11 +246,34 @@ var discordCaps = &event.RoomFeatures{
 }
 
 func (d *DiscordClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal) *event.RoomFeatures {
+	meta := portal.Metadata.(*discordid.PortalMetadata)
+	var premiumType discordgo.UserPremiumType
+	var guildTier discordgo.PremiumTier
+	// Before the first connection there is no session state to ask, and the
+	// limits of an account without Nitro are the ones that always work.
+	if d.Session != nil && d.Session.State != nil {
+		if user := d.Session.State.User; user != nil {
+			premiumType = user.PremiumType
+		}
+		if meta.GuildID != "" {
+			if guild, err := d.Session.State.Guild(meta.GuildID); err == nil && guild != nil {
+				guildTier = guild.PremiumTier
+			}
+		}
+	}
+	return portalCaps(meta, premiumType, guildTier)
+}
+
+// portalCaps returns the capabilities of a room for an account with the given
+// subscription, in a server with the given boost level.
+func portalCaps(meta *discordid.PortalMetadata, premiumType discordgo.UserPremiumType, guildTier discordgo.PremiumTier) *event.RoomFeatures {
 	caps := discordCaps.Clone()
-	if portal.Metadata.(*discordid.PortalMetadata).GuildID == "" {
+	if meta.GuildID == "" {
 		caps.Thread = event.CapLevelUnsupported
 	}
-	roomManagementCaps(caps, portalChannelKind(portal.Metadata.(*discordid.PortalMetadata)))
+	roomManagementCaps(caps, portalChannelKind(meta))
+	maxTextLength, maxFileSize := limitsFor(premiumType, guildTier)
+	applyLimits(caps, maxTextLength, maxFileSize)
 	return caps
 }
 
