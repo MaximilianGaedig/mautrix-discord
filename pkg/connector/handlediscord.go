@@ -727,6 +727,9 @@ func (d *DiscordClient) handleDiscordStateEvent(rawEvt any) {
 	ctx := d.UserLogin.Bridge.BackgroundCtx
 	log := zerolog.Ctx(ctx)
 
+	// After the event itself: READY fills the user cache the presences are checked against.
+	defer d.handlePresenceEvent(ctx, rawEvt)
+
 	switch evt := rawEvt.(type) {
 	case *discordgo.ReadySupplemental:
 		log.Info().
@@ -933,6 +936,7 @@ func (d *DiscordClient) handleDiscordEvent(rawEvt any) {
 		if !bridged {
 			return
 		}
+		d.notePresenceActivity(evt)
 		d.handleDiscordTyping(ctx, evt, route)
 	case *discordgo.VoiceStateUpdate:
 		d.handleVoiceStateUpdate(ctx, evt)
@@ -1059,6 +1063,8 @@ func (d *DiscordClient) handleDiscordEvent(rawEvt any) {
 			return
 		}
 
+		d.notePresenceActivity(evt)
+
 		if evt.Message.Type == discordgo.MessageTypeCall {
 			// Logged as one entry that follows the call, from the raw event (see handleCallEvent).
 			return
@@ -1145,6 +1151,7 @@ func (d *DiscordClient) handleDiscordEvent(rawEvt any) {
 		if !bridged {
 			return
 		}
+		d.notePresenceActivity(evt)
 		wrappedEvt, err := d.wrapDiscordReaction(ctx, evt.MessageReaction, route, true)
 		if err != nil {
 			log.Err(err).Msg("Dropping incoming reaction due to error")

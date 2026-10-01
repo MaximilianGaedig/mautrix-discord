@@ -43,6 +43,7 @@ import (
 
 	"go.mau.fi/mautrix-discord/pkg/discordauth"
 	"go.mau.fi/mautrix-discord/pkg/discordid"
+	"go.mau.fi/mautrix-discord/pkg/discordpresence"
 )
 
 type DiscordClient struct {
@@ -59,6 +60,12 @@ type DiscordClient struct {
 	// seenReady is used to discern the initial READY payload from ones
 	// received during reconnections (where resumption is not possible).
 	seenReady atomic.Bool
+
+	// presenceTracker remembers who was last seen online, to mark those missing after a new READY
+	// offline. readyPresences holds READY's part of that snapshot until READY_SUPPLEMENTAL brings
+	// the rest; it is only touched from the gateway's goroutine.
+	presenceTracker discordpresence.Tracker
+	readyPresences  []discordpresence.Entry
 
 	markedOpened     map[string]time.Time
 	markedOpenedLock sync.Mutex

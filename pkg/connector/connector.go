@@ -30,6 +30,7 @@ import (
 	"go.mau.fi/mautrix-discord/pkg/connector/discorddb"
 	"go.mau.fi/mautrix-discord/pkg/discordid"
 	"go.mau.fi/mautrix-discord/pkg/msgconv"
+	"go.mau.fi/mautrix-discord/pkg/presence"
 )
 
 type DiscordConnector struct {
@@ -43,6 +44,9 @@ type DiscordConnector struct {
 	// rtcFocus is the homeserver's LiveKit focus, discovered once and shared by every bridged
 	// voice channel: it is a property of the homeserver, not of a call.
 	rtcFocus callbridge.RTCFocus
+
+	// presence bridges Discord statuses to Matrix presence; nil unless presence_bridging is on.
+	presence *presence.Manager
 }
 
 var (
@@ -75,6 +79,7 @@ func (d *DiscordConnector) Start(ctx context.Context) error {
 	}
 
 	d.registerVoiceHandlers()
+	d.startPresence()
 
 	log.Debug().Msg("Setting up provisioning API")
 

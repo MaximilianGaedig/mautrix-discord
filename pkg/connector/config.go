@@ -53,6 +53,9 @@ type Config struct {
 	// channel when a Matrix user joins the call, and publishes each Discord speaker as their ghost.
 	VoiceBridging bool `yaml:"voice_bridging"`
 
+	// PresenceBridging sets Matrix presence on ghosts from the statuses the gateway sends anyway.
+	PresenceBridging bool `yaml:"presence_bridging"`
+
 	// Proxy is a static proxy address (HTTP or SOCKS5) for connecting to
 	// Discord. Ignored when GetProxyFrom is set.
 	Proxy string `yaml:"proxy"`
@@ -166,6 +169,7 @@ func upgradeConfig(helper up.Helper) {
 	helper.Copy(up.Bool, "per_message_profiles_on_every_message_hack")
 	helper.Copy(up.Bool, "log_when_dropping_messages")
 	helper.Copy(up.Bool, "voice_bridging")
+	helper.Copy(up.Bool, "presence_bridging")
 	helper.Copy(up.Str, "proxy")
 	helper.Copy(up.Str, "get_proxy_from")
 	helper.Copy(up.Bool, "proxy_media")

@@ -46,6 +46,14 @@ func NewUserCache(session *discordgo.Session) *UserCache {
 	}
 }
 
+// Known reports whether the user is one the bridge has come across, without asking Discord.
+func (uc *UserCache) Known(userID string) bool {
+	uc.lock.Lock()
+	defer uc.lock.Unlock()
+	_, ok := uc.cache[userID]
+	return ok
+}
+
 func (uc *UserCache) UpdateWithReady(ready *discordgo.Ready) {
 	if ready == nil {
 		return

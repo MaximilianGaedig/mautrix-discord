@@ -50,6 +50,14 @@ log_when_dropping_messages: true
 # their own ghost participant. Audio only.
 voice_bridging: false
 
+# Should Discord users' status be bridged to Matrix presence on their ghosts? Online and "do not
+# disturb" are online; idle, offline and invisible are offline, sent once when the user is seen
+# going away. Sending a message, typing or reacting counts as online for five minutes. Only what
+# Discord sends to your session anyway is used (friends, people you share a DM with, and the guild
+# members it chooses to tell you about): the bridge asks Discord for nothing. Discord has no
+# "last seen", so there is none to bridge.
+presence_bridging: true
+
 # Static proxy address (HTTP or SOCKS5) for connecting to Discord.
 proxy:
 # HTTP endpoint to request a new proxy address from, for dynamically assigned
