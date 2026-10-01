@@ -666,6 +666,7 @@ func (d *DiscordClient) handleMessageAck(ctx context.Context, ack *discordgo.Mes
 	// TODO: mention_count can appear in MESSAGE_ACK payloads. Update it if it's
 	// present and not `null`. This needs discordgo changes. (There's even more
 	// missing fields than this.)
+	prev := d.readStates[ack.ChannelID]
 	d.readStates[ack.ChannelID] = &discordgo.ReadState{
 		ID:            ack.ChannelID,
 		LastMessageID: discordgo.StringOrInt(ack.MessageID),
@@ -673,15 +674,7 @@ func (d *DiscordClient) handleMessageAck(ctx context.Context, ack *discordgo.Mes
 	d.readStatesLock.Unlock()
 
 	if bridged {
-		d.UserLogin.Bridge.QueueRemoteEvent(d.UserLogin, &simplevent.Receipt{
-			EventMeta: simplevent.EventMeta{
-				Type:              bridgev2.RemoteEventReadReceipt,
-				PortalKey:         route.PortalKey,
-				Sender:            d.selfEventSender(),
-				UncertainReceiver: route.Uncertain,
-			},
-			LastTarget: discordid.MakeMessageID(ack.MessageID),
-		})
+		d.UserLogin.Bridge.QueueRemoteEvent(d.UserLogin, d.ackEvent(prev, ack, route))
 	}
 }
 

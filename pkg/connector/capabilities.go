@@ -68,7 +68,7 @@ func (d *DiscordConnector) GetCapabilities() *bridgev2.NetworkGeneralCapabilitie
 }
 
 func (d *DiscordConnector) GetBridgeInfoVersion() (info, caps int) {
-	return 1, 5
+	return 1, 6
 }
 
 /*func supportedIfFFmpeg() event.CapabilitySupportLevel {
@@ -79,7 +79,7 @@ func (d *DiscordConnector) GetBridgeInfoVersion() (info, caps int) {
 }*/
 
 func capID() string {
-	base := "fi.mau.discord.capabilities.2026_09_30"
+	base := "fi.mau.discord.capabilities.2026_10_02"
 	if ffmpeg.Supported() {
 		return base + "+ffmpeg"
 	}
@@ -242,6 +242,7 @@ var discordCaps = &event.RoomFeatures{
 	PollOptionMaxLength: msgconv.MaxPollAnswerLength,
 	LocationMessage:     event.CapLevelUnsupported,
 	MaxTextLength:       MaxTextLength,
+	MarkAsUnread:        true,
 	Thread:              event.CapLevelPartialSupport,
 }
 

@@ -500,12 +500,14 @@ func (d *DiscordClient) HandleMatrixReadReceipt(ctx context.Context, msg *bridge
 	if threadChannelID != "" {
 		channelID = threadChannelID
 	}
+	restoreReadState := d.noteOwnAck(channelID, targetMessageID)
 	resp, err := d.Session.ChannelMessageAckNoToken(
 		channelID,
 		targetMessageID,
 		makeDiscordReferer(guildID, parentChannelID, threadChannelID),
 	)
 	if err != nil {
+		restoreReadState()
 		log.Err(err).Msg("Failed to send read receipt to Discord")
 		return err
 	} else if resp.Token != nil {
