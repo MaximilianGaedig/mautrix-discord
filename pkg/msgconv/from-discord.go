@@ -251,8 +251,6 @@ const msgInteractionTemplateHTML = `<blockquote>
 <a href="https://matrix.to/#/%s">%s</a> used <font color="#3771bb">/%s</font>
 </blockquote>`
 
-const msgComponentTemplateHTML = `<p>This message contains interactive elements. Use the Discord app to interact with the message.</p>`
-
 func (mc *MessageConverter) addReplyToConvertedMessage(
 	ctx context.Context,
 	converted *bridgev2.ConvertedMessage,
@@ -345,9 +343,11 @@ func (mc *MessageConverter) renderDiscordTextMessage(ctx context.Context, intent
 	htmlParts = append(htmlParts, embedHTML...)
 	previews = append(previews, forwardedPreviews...)
 
-	if len(msg.Components) > 0 {
-		htmlParts = append(htmlParts, msgComponentTemplateHTML)
-	}
+	// Buttons and menus can't be used from Matrix, but what they say is part
+	// of the message, so list them instead of only saying that they exist.
+	htmlParts = append(htmlParts, renderComponentsHTML(msg.Components, func(text string) string {
+		return mc.renderDiscordMarkdownOnlyHTMLNoUnwrap(ctx, portal, source, text, true)
+	})...)
 
 	if len(htmlParts) == 0 {
 		return nil
