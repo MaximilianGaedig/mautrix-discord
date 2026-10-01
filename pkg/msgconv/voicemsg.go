@@ -122,6 +122,19 @@ func matrixWaveformToDiscord(samples []int, durationMs int) []byte {
 	return clampedSamples
 }
 
+// discordWaveformToMatrix turns the waveform of a Discord voice message, one
+// byte per sample, into the whole numbers up to 1024 that Matrix clients
+// draw. Four times the byte keeps it a whole number (the homeserver refuses
+// anything else in an event) and is undone exactly by matrixWaveformToDiscord
+// when the voice message is sent back to Discord.
+func discordWaveformToMatrix(waveform []byte) []int {
+	samples := make([]int, len(waveform))
+	for i, sample := range waveform {
+		samples[i] = int(sample) * 4
+	}
+	return samples
+}
+
 func getDiscordVoiceMetadata(content *event.MessageEventContent) *discordVoiceMetadata {
 	if content.MSC3245Voice == nil || content.MSC1767Audio == nil {
 		return nil

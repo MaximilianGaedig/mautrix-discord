@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"math"
 	"net/url"
 	"path"
 	"strconv"
@@ -871,12 +872,13 @@ func (mc *MessageConverter) renderDiscordAttachment(
 		content.MsgType = event.MsgAudio
 		if att.Waveform != nil {
 			// Bridge a voice message.
-
-			// TODO convert waveform
-			extra["org.matrix.msc1767.audio"] = map[string]any{
-				"duration": int(att.DurationSeconds * 1000),
+			durationMs := int(math.Round(att.DurationSeconds * 1000))
+			content.Info.Duration = durationMs
+			content.MSC1767Audio = &event.MSC1767Audio{
+				Duration: durationMs,
+				Waveform: discordWaveformToMatrix(att.Waveform),
 			}
-			extra["org.matrix.msc3245.voice"] = map[string]any{}
+			content.MSC3245Voice = &event.MSC3245Voice{}
 		}
 	case "image":
 		content.MsgType = event.MsgImage
