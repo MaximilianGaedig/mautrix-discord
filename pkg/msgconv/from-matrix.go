@@ -109,15 +109,26 @@ func (mc *MessageConverter) ToDiscord(
 			ChannelID: discordid.ParseChannelPortalID(msg.ReplyTo.Room.ID),
 			MessageID: discordid.ParseMessageID(msg.ReplyTo.ID),
 		}
+		if mc.replyIsSilent(ctx, msg) {
+			// What Discord's own client sends with the reply's ping switched
+			// off: every kind of mention still parsed, as it is without
+			// allowed_mentions, and only the replied-to user left out.
+			req.AllowedMentions = &discordgo.MessageAllowedMentions{
+				Parse: []discordgo.AllowedMentionType{
+					discordgo.AllowedMentionTypeUsers,
+					discordgo.AllowedMentionTypeRoles,
+					discordgo.AllowedMentionTypeEveryone,
+				},
+				RepliedUser: false,
+			}
+		}
 	}
 
 	content := msg.Content
 
 	convertMatrix := func() {
-		// TODO: Handle (silent) replies.
-		//
 		// NOTE: Real users should never send allowed_mentions (except for
-		// silent replies).
+		// silent replies, which are handled above).
 		//
 		// Since we only support real users at the moment, always ignore the
 		// returned allowed mentions.
@@ -205,6 +216,40 @@ func (mc *MessageConverter) ToDiscord(
 	}
 
 	return &req, nil
+}
+
+// replyIsSilent says whether a reply should leave its target's author
+// unpinged. Discord pings the author of the replied-to message unless told
+// otherwise; on Matrix a reply only notifies the people in its m.mentions,
+// where clients put the author by default and take them out when the user
+// asks for a quiet reply.
+//
+// A message without m.mentions comes from a client that predates intentional
+// mentions and so says nothing either way. It pings, as a reply on Discord does.
+func (mc *MessageConverter) replyIsSilent(ctx context.Context, msg *bridgev2.MatrixMessage) bool {
+	if msg.ReplyTo == nil || msg.Content == nil || msg.Content.Mentions == nil {
+		return false
+	}
+	for _, mentioned := range msg.Content.Mentions.UserIDs {
+		if msg.ReplyTo.SenderMXID != "" && mentioned == msg.ReplyTo.SenderMXID {
+			return false
+		}
+		// The replied-to message may have been sent by another Matrix account
+		// than the one mentioned (the author's ghost rather than their own
+		// account, or the other way around), so compare who they are on
+		// Discord as well.
+		discordUserID, err := mc.resolveMentionedDiscordUserID(ctx, msg.Portal, mentioned)
+		if err != nil {
+			zerolog.Ctx(ctx).Debug().Err(err).
+				Stringer("mentioned_mxid", mentioned).
+				Msg("Failed to resolve a mentioned user while checking whether a reply pings its target")
+			continue
+		}
+		if discordUserID != "" && discordid.MakeUserID(discordUserID) == msg.ReplyTo.SenderID {
+			return false
+		}
+	}
+	return true
 }
 
 // PollToDiscord converts a Matrix poll start into a message that carries a
