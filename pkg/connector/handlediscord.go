@@ -1145,7 +1145,14 @@ func (d *DiscordClient) handleDiscordEvent(rawEvt any) {
 
 		wrappedEvt := d.wrapDiscordMessage(ctx, evt.Message, route, bridgev2.RemoteEventMessageRemove)
 		d.UserLogin.Bridge.QueueRemoteEvent(d.UserLogin, &wrappedEvt)
-	// TODO *discordgo.MessageDeleteBulk
+	case *discordgo.MessageDeleteBulk:
+		bridged, route := d.channelIsBridged(ctx, evt.ChannelID)
+		if !bridged {
+			return
+		}
+		for _, wrappedEvt := range d.bulkDeleteEvents(evt, route) {
+			d.UserLogin.Bridge.QueueRemoteEvent(d.UserLogin, wrappedEvt)
+		}
 	case *discordgo.MessageReactionAdd:
 		bridged, route := d.channelIsBridged(ctx, evt.ChannelID)
 		if !bridged {
@@ -1158,8 +1165,18 @@ func (d *DiscordClient) handleDiscordEvent(rawEvt any) {
 		} else {
 			d.UserLogin.Bridge.QueueRemoteEvent(d.UserLogin, wrappedEvt)
 		}
-	// TODO case *discordgo.MessageReactionRemoveAll:
-	// TODO case *discordgo.MessageReactionRemoveEmoji: (needs impl. in discordgo)
+	case *discordgo.MessageReactionRemoveAll:
+		bridged, route := d.channelIsBridged(ctx, evt.ChannelID)
+		if !bridged {
+			return
+		}
+		d.UserLogin.Bridge.QueueRemoteEvent(d.UserLogin, reactionClearEvent(evt.MessageReaction, route))
+	case *discordgo.MessageReactionRemoveEmoji:
+		bridged, route := d.channelIsBridged(ctx, evt.ChannelID)
+		if !bridged {
+			return
+		}
+		d.UserLogin.Bridge.QueueRemoteEvent(d.UserLogin, reactionEmojiRemoveEvent(evt.MessageReaction, route))
 	case *discordgo.MessageReactionRemove:
 		bridged, route := d.channelIsBridged(ctx, evt.ChannelID)
 		if !bridged {
