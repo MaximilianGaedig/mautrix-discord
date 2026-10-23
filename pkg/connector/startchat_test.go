@@ -4,22 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/bwmarrin/discordgo"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 )
-
-func testUsers() map[string]*discordgo.User {
-	return map[string]*discordgo.User{
-		"100000000000000001": {ID: "100000000000000001", Username: "alice", Discriminator: "0", GlobalName: "Alice A"},
-		"100000000000000002": {ID: "100000000000000002", Username: "bobby", Discriminator: "0", GlobalName: "Robert"},
-		"100000000000000003": {ID: "100000000000000003", Username: "carol", Discriminator: "1234"},
-		"100000000000000009": {ID: "100000000000000009", Username: "me", Discriminator: "0"},
-	}
-}
-
-
-
-
 
 func TestNewGroupDMRequest(t *testing.T) {
 	ids := []networkid.UserID{"100000000000000001", "100000000000000002", "100000000000000001", "100000000000000009"}
