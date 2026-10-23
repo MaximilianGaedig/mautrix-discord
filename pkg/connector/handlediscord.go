@@ -961,7 +961,6 @@ func (d *DiscordClient) handleDiscordEvent(rawEvt any) {
 		// offline.
 		d.syncRemoteProfile(ctx)
 		go d.resyncGhostsFromReady(ctx, evt)
-		d.mirrorReadyBlocks(ctx, evt.Relationships)
 		d.refreshSafetyHub(ctx)
 		d.pokeVitals(ctx)
 		d.sendCurrentState(ctx) // (pokeVitals already enqueued a new bridge state but let's be explicit about it here.)
