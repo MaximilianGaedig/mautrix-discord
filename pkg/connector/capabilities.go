@@ -46,9 +46,7 @@ var DiscordGeneralCaps = &bridgev2.NetworkGeneralCapabilities{
 
 	Provisioning: bridgev2.ProvisioningCapabilities{
 		ResolveIdentifier: bridgev2.ResolveIdentifierCapabilities{
-			CreateDM: true,
-			// Only friends and users already seen by the bridge can be
-			// found by name; Discord has no global username lookup.
+			CreateDM:       true,
 			LookupUsername: true,
 			ContactList:    true,
 			Search:         true,
@@ -79,7 +77,7 @@ func (d *DiscordConnector) GetBridgeInfoVersion() (info, caps int) {
 }*/
 
 func capID() string {
-	base := "fi.mau.discord.capabilities.2026_10_02"
+	base := "fi.mau.discord.capabilities.2026_10_24"
 	if ffmpeg.Supported() {
 		return base + "+ffmpeg"
 	}
@@ -284,6 +282,7 @@ func roomManagementCaps(caps *event.RoomFeatures, kind channelKind) {
 	switch kind {
 	case kindDM:
 		caps.DeleteChat = true
+		caps.BlockUser = true
 	case kindGroupDM:
 		caps.State = event.StateFeatureMap{
 			event.StateRoomName.Type:   {Level: event.CapLevelFullySupported},

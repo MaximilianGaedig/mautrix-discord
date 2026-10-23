@@ -27,12 +27,12 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/rs/zerolog"
-	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/database"
-	"maunium.net/go/mautrix/event"
-
 	"go.mau.fi/util/ptr"
 	"go.mau.fi/util/variationselector"
+	"maunium.net/go/mautrix/bridgev2"
+	"maunium.net/go/mautrix/bridgev2/database"
+	"maunium.net/go/mautrix/bridgev2/networkid"
+	"maunium.net/go/mautrix/event"
 
 	"go.mau.fi/mautrix-discord/pkg/discordid"
 )
@@ -44,6 +44,7 @@ var (
 	_ bridgev2.ReadReceiptHandlingNetworkAPI = (*DiscordClient)(nil)
 	_ bridgev2.TypingHandlingNetworkAPI      = (*DiscordClient)(nil)
 	_ bridgev2.MuteHandlingNetworkAPI        = (*DiscordClient)(nil)
+	_ bridgev2.UserBlockingNetworkAPI        = (*DiscordClient)(nil)
 )
 
 type contextKey int
@@ -162,8 +163,18 @@ func (d *DiscordClient) sendMatrixMessage(
 		d.lastSendAttemptMutex.Unlock()
 	}
 
+	txnID := networkid.TransactionID(sendReq.Nonce)
+	pendingMsg := &database.Message{}
+	if threadRootRemoteID != "" {
+		pendingMsg.ThreadRoot = discordid.MakeMessageID(threadRootRemoteID)
+	}
+	msg.AddPendingToSave(pendingMsg, txnID, nil)
 	sentMsg, err := d.Session.ChannelMessageSendComplex(channelID, sendReq, refererOpt, discordgo.WithContext(ctx))
 	if err != nil {
+		var restErr *discordgo.RESTError
+		if errors.As(err, &restErr) {
+			msg.RemovePending(txnID)
+		}
 		return nil, nil, d.tryWrappingError(ctx, err)
 	}
 	sentMsgTimestamp, _ := discordgo.SnowflakeTimestamp(sentMsg.ID)
@@ -177,7 +188,8 @@ func (d *DiscordClient) sendMatrixMessage(
 	}
 
 	return &bridgev2.MatrixMessageResponse{
-		DB: dbMessage,
+		DB:            dbMessage,
+		RemovePending: txnID,
 	}, sentMsg, nil
 }
 
@@ -280,7 +292,12 @@ func (d *DiscordClient) PreHandleMatrixReaction(ctx context.Context, reaction *b
 		if err != nil {
 			return bridgev2.MatrixReactionPreResponse{}, fmt.Errorf("failed to get custom emoji by mxc: %w", err)
 		} else if customEmoji == nil || customEmoji.ID == "" || customEmoji.Name == "" {
-			return bridgev2.MatrixReactionPreResponse{}, fmt.Errorf("unknown custom emoji mxc: %q", emojiID)
+			return bridgev2.MatrixReactionPreResponse{}, bridgev2.WrapErrorInStatus(fmt.Errorf("unknown custom emoji mxc: %q", emojiID)).
+				WithMessage("that emoji can't be used on Discord").
+				WithIsCertain(true).
+				WithSendNotice(true).
+				WithErrorReason(event.MessageStatusUnsupported).
+				WithStatus(event.MessageStatusFail)
 		}
 
 		emojiID = fmt.Sprintf("%s:%s", customEmoji.Name, customEmoji.ID)
@@ -557,6 +574,8 @@ func (d *DiscordClient) viewingChannel(ctx context.Context, portal *bridgev2.Por
 func (d *DiscordClient) HandleMatrixTyping(ctx context.Context, msg *bridgev2.MatrixTyping) error {
 	if !d.IsLoggedIn() {
 		return bridgev2.ErrNotLoggedIn
+	} else if !msg.IsTyping {
+		return nil
 	}
 
 	log := zerolog.Ctx(ctx)
@@ -632,4 +651,31 @@ func (d *DiscordClient) HandleMute(ctx context.Context, msg *bridgev2.MatrixMute
 
 	}
 	return nil
+}
+
+func (d *DiscordClient) HandleMatrixBlockUser(ctx context.Context, msg *bridgev2.MatrixBlockUser) error {
+	if !d.IsLoggedIn() {
+		return bridgev2.ErrNotLoggedIn
+	}
+	if msg.Content.ReportSpam {
+		return bridgev2.WrapErrorInStatus(errors.New("reporting spam is not supported on Discord")).WithIsCertain(true).WithErrorAsMessage().WithErrorReason(event.MessageStatusUnsupported).WithStatus(event.MessageStatusFail)
+	}
+	ch, err := d.Session.State.Channel(discordid.ParseChannelPortalID(msg.Portal.ID))
+	if err != nil {
+		return err
+	}
+	recipient := dmChannelRecipientID(ch)
+	if ch.Type != discordgo.ChannelTypeDM || recipient == nil {
+		return bridgev2.ErrNonDMBlockUser
+	}
+	if msg.Content.Block {
+		err = d.Session.RelationshipUserBlock(*recipient)
+	} else {
+		rel := d.relationshipWithUserID(*recipient)
+		if rel == nil || rel.Type != discordgo.RelationshipBlocked {
+			return nil
+		}
+		err = d.Session.RelationshipDelete(*recipient)
+	}
+	return err
 }
