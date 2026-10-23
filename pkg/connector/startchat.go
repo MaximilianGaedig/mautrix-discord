@@ -20,8 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
-	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
@@ -34,125 +33,218 @@ import (
 
 var (
 	_ bridgev2.IdentifierResolvingNetworkAPI = (*DiscordClient)(nil)
+	_ bridgev2.GhostDMCreatingNetworkAPI     = (*DiscordClient)(nil)
 	_ bridgev2.ContactListingNetworkAPI      = (*DiscordClient)(nil)
 	_ bridgev2.UserSearchingNetworkAPI       = (*DiscordClient)(nil)
+	_ bridgev2.IdentifierValidatingNetwork   = (*DiscordConnector)(nil)
 	_ bridgev2.GroupCreatingNetworkAPI       = (*DiscordClient)(nil)
 )
 
-const (
-	// Discord lets a group DM hold 10 people including the creator.
-	maxGroupDMRecipients = 9
-	maxSearchResults     = 50
-)
-
-var (
-	snowflakeRe = regexp.MustCompile(`^\d{15,25}$`)
-	mentionRe   = regexp.MustCompile(`^<@!?(\d{15,25})>$`)
-)
-
-// parsedIdentifier is the result of [parseIdentifier]. Exactly one of ID and
-// Username is set.
-type parsedIdentifier struct {
-	ID       string
-	Username string
+func isSnowflake(id string) bool {
+	_, err := strconv.ParseUint(id, 10, 64)
+	return err == nil
 }
 
-// parseIdentifier understands a raw user ID, a "<@id>" mention, or a username
-// (optionally prefixed with "@", optionally with a legacy "#1234" suffix).
-// Usernames are lowercased, since Discord usernames are case-insensitive.
-func parseIdentifier(identifier string) (parsedIdentifier, bool) {
+func (d *DiscordConnector) ValidateUserID(id networkid.UserID) bool {
+	return isSnowflake(discordid.ParseUserID(id))
+}
+
+func (d *DiscordClient) ResolveIdentifier(ctx context.Context, identifier string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
+	if d.Session == nil {
+		return nil, bridgev2.ErrNotLoggedIn
+	}
+
 	identifier = strings.TrimSpace(identifier)
-	if m := mentionRe.FindStringSubmatch(identifier); m != nil {
-		return parsedIdentifier{ID: m[1]}, true
-	}
+	identifier = strings.TrimPrefix(identifier, "discord:")
 	identifier = strings.TrimPrefix(identifier, "@")
-	if identifier == "" {
-		return parsedIdentifier{}, false
+
+	var user *discordgo.User
+	if isSnowflake(identifier) {
+		user = d.userCache.Resolve(ctx, identifier)
 	}
-	if snowflakeRe.MatchString(identifier) {
-		return parsedIdentifier{ID: identifier}, true
+	if user == nil {
+		user = d.knownUserWithUsername(ctx, identifier)
 	}
-	return parsedIdentifier{Username: strings.ToLower(identifier)}, true
+	if user == nil {
+		return nil, nil
+	}
+
+	resp, err := d.makeResolveIdentifierResponse(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+	if createChat {
+		resp.Chat, err = d.CreateChatWithGhost(ctx, resp.Ghost)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return resp, nil
 }
 
-// userMatchesUsername checks whether the user's username (or username#disc)
-// equals the given lowercase username.
-func userMatchesUsername(u *discordgo.User, username string) bool {
-	return strings.ToLower(u.Username) == username || strings.ToLower(u.String()) == username
+func (d *DiscordClient) CreateChatWithGhost(ctx context.Context, ghost *bridgev2.Ghost) (*bridgev2.CreateChatResponse, error) {
+	if d.Session == nil {
+		return nil, bridgev2.ErrNotLoggedIn
+	}
+
+	userID := discordid.ParseUserID(ghost.ID)
+	ch := d.dmChannelForUserID(userID)
+	if ch == nil {
+		var err error
+		ch, err = d.Session.UserChannelCreate(userID, discordgo.WithContext(ctx))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create DM channel: %w", err)
+		}
+		if err = d.Session.State.ChannelAdd(ch); err != nil {
+			zerolog.Ctx(ctx).Warn().Err(err).
+				Str("channel_id", ch.ID).
+				Msg("Failed to add created DM channel to state")
+		}
+	}
+
+	chatInfo, err := d.getChannelChatInfo(ctx, ch)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chat info: %w", err)
+	}
+	return &bridgev2.CreateChatResponse{
+		PortalKey:  d.portalKeyForChannel(ch),
+		PortalInfo: chatInfo,
+	}, nil
 }
 
-// findUserByUsername looks for an exact username match, friends first.
-func findUserByUsername(friends, known []*discordgo.User, username string) *discordgo.User {
-	for _, list := range [][]*discordgo.User{friends, known} {
-		for _, u := range list {
-			if u != nil && userMatchesUsername(u, username) {
-				return u
-			}
+func (d *DiscordClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIdentifierResponse, error) {
+	if d.Session == nil {
+		return nil, bridgev2.ErrNotLoggedIn
+	}
+
+	friends := d.friends(ctx)
+	results := make([]*bridgev2.ResolveIdentifierResponse, 0, len(friends))
+	for _, user := range friends {
+		resp, err := d.makeResolveIdentifierResponse(ctx, user)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, resp)
+	}
+	return results, nil
+}
+
+func (d *DiscordClient) SearchUsers(ctx context.Context, query string) ([]*bridgev2.ResolveIdentifierResponse, error) {
+	if d.Session == nil {
+		return nil, bridgev2.ErrNotLoggedIn
+	}
+
+	query = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(query), "@"))
+	if query == "" {
+		return nil, nil
+	}
+
+	var results []*bridgev2.ResolveIdentifierResponse
+	for _, user := range d.knownUsers(ctx) {
+		if !d.userMatchesQuery(user, query) {
+			continue
+		}
+		resp, err := d.makeResolveIdentifierResponse(ctx, user)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, resp)
+	}
+	return results, nil
+}
+
+func (d *DiscordClient) makeResolveIdentifierResponse(ctx context.Context, user *discordgo.User) (*bridgev2.ResolveIdentifierResponse, error) {
+	userID := discordid.MakeUserID(user.ID)
+	ghost, err := d.connector.Bridge.GetGhostByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get ghost: %w", err)
+	}
+	return &bridgev2.ResolveIdentifierResponse{
+		Ghost:    ghost,
+		UserID:   userID,
+		UserInfo: d.getUserInfo(ctx, user),
+	}, nil
+}
+
+func (d *DiscordClient) userMatchesQuery(user *discordgo.User, query string) bool {
+	if strings.Contains(strings.ToLower(user.String()), query) ||
+		strings.Contains(strings.ToLower(user.GlobalName), query) {
+		return true
+	}
+	rel := d.relationshipWithUserID(user.ID)
+	return rel != nil && strings.Contains(strings.ToLower(rel.Nickname), query)
+}
+
+func (d *DiscordClient) knownUserWithUsername(ctx context.Context, username string) *discordgo.User {
+	if username == "" {
+		return nil
+	}
+	for _, user := range d.knownUsers(ctx) {
+		if strings.EqualFold(user.String(), username) || strings.EqualFold(user.Username, username) {
+			return user
 		}
 	}
 	return nil
 }
 
-// friendUsers picks the users for whom the relationship is a friendship,
-// sorted by display name for stable output. Users that aren't known are skipped.
-func friendUsers(rels []*discordgo.Relationship, lookup func(id string) *discordgo.User) []*discordgo.User {
-	var out []*discordgo.User
-	for _, rel := range rels {
-		if rel == nil || rel.Type != discordgo.RelationshipFriend {
-			continue
-		}
-		if u := lookup(rel.ID); u != nil {
-			out = append(out, u)
+func (d *DiscordClient) friendIDs() []string {
+	d.relationshipLock.RLock()
+	defer d.relationshipLock.RUnlock()
+
+	ids := make([]string, 0, len(d.relationships))
+	for id, rel := range d.relationships {
+		if rel.Type == discordgo.RelationshipFriend {
+			ids = append(ids, id)
 		}
 	}
-	sortUsers(out)
-	return out
+	return ids
 }
 
-func sortUsers(users []*discordgo.User) {
-	sort.SliceStable(users, func(i, j int) bool {
-		a, b := strings.ToLower(users[i].DisplayName()), strings.ToLower(users[j].DisplayName())
-		if a != b {
-			return a < b
+func (d *DiscordClient) friends(ctx context.Context) []*discordgo.User {
+	ids := d.friendIDs()
+	users := make([]*discordgo.User, 0, len(ids))
+	for _, id := range ids {
+		if user := d.userCache.Resolve(ctx, id); user != nil {
+			users = append(users, user)
 		}
-		return users[i].ID < users[j].ID
-	})
+	}
+	return users
 }
 
-// searchUsers filters friends and then other known users by a
-// case-insensitive substring of the username, display name or ID. Friends
-// come first, each user appears once, and self is excluded.
-func searchUsers(friends, known []*discordgo.User, query, selfID string) []*discordgo.User {
-	query = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(query), "@")))
-	if query == "" {
-		return nil
-	}
-	seen := map[string]bool{selfID: true}
-	var out []*discordgo.User
-	collect := func(list []*discordgo.User) {
-		var matched []*discordgo.User
-		for _, u := range list {
-			if u == nil || seen[u.ID] {
-				continue
-			}
-			if strings.Contains(strings.ToLower(u.Username), query) ||
-				strings.Contains(strings.ToLower(u.GlobalName), query) ||
-				strings.Contains(strings.ToLower(u.String()), query) ||
-				u.ID == query {
-				seen[u.ID] = true
-				matched = append(matched, u)
-			}
+func (d *DiscordClient) knownUsers(ctx context.Context) []*discordgo.User {
+	selfID := discordid.ParseUserLoginID(d.UserLogin.ID)
+	seen := map[string]struct{}{selfID: {}}
+	var users []*discordgo.User
+	add := func(user *discordgo.User) {
+		if user == nil || user.ID == "" {
+			return
 		}
-		sortUsers(matched)
-		out = append(out, matched...)
+		if _, ok := seen[user.ID]; ok {
+			return
+		}
+		seen[user.ID] = struct{}{}
+		users = append(users, user)
 	}
-	collect(friends)
-	collect(known)
-	if len(out) > maxSearchResults {
-		out = out[:maxSearchResults]
+
+	for _, user := range d.friends(ctx) {
+		add(user)
 	}
-	return out
+
+	d.Session.State.RLock()
+	for _, ch := range d.Session.State.PrivateChannels {
+		for _, recipient := range ch.Recipients {
+			add(recipient)
+		}
+	}
+	d.Session.State.RUnlock()
+
+	return users
 }
+
+// Group DMs from Matrix: not in upstream (mautrix/discord#270 starts DMs only).
+
+// Discord lets a group DM hold 10 people including the creator.
+const maxGroupDMRecipients = 9
 
 // groupDMRequest is the body of `POST /users/@me/channels` for a group DM.
 type groupDMRequest struct {
@@ -181,136 +273,11 @@ func newGroupDMRequest(participants []networkid.UserID, selfID string) (*groupDM
 	return req, nil
 }
 
-func (d *DiscordClient) friendList() []*discordgo.User {
-	if d.Session == nil || d.Session.State == nil {
-		return nil
-	}
-	d.relationshipLock.RLock()
-	rels := make([]*discordgo.Relationship, 0, len(d.relationships))
-	for _, rel := range d.relationships {
-		rels = append(rels, rel)
-	}
-	d.relationshipLock.RUnlock()
-
-	return friendUsers(rels, func(id string) *discordgo.User {
-		return d.userCache.Resolve(context.Background(), id)
-	})
-}
-
-func (d *DiscordClient) existingDMChannel(userID string) *discordgo.Channel {
-	if d.Session == nil || d.Session.State == nil {
-		return nil
-	}
-	d.Session.State.RLock()
-	defer d.Session.State.RUnlock()
-	for _, ch := range d.Session.State.PrivateChannels {
-		if id := dmChannelRecipientID(ch); id != nil && *id == userID {
-			return ch
-		}
-	}
-	return nil
-}
-
-func (d *DiscordClient) chatResponseForChannel(ctx context.Context, ch *discordgo.Channel) (*bridgev2.CreateChatResponse, error) {
-	if d.Session.State != nil {
-		if err := d.Session.State.ChannelAdd(ch); err != nil {
-			zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to add new channel to state")
-		}
-	}
-	info, err := d.getChannelChatInfo(ctx, ch)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get chat info: %w", err)
-	}
-	return &bridgev2.CreateChatResponse{
-		PortalKey:  d.portalKeyForChannel(ch),
-		PortalInfo: info,
-	}, nil
-}
-
-func (d *DiscordClient) resolveUserResponse(ctx context.Context, user *discordgo.User, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
-	userID := discordid.MakeUserID(user.ID)
-	ghost, err := d.connector.Bridge.GetGhostByID(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get ghost: %w", err)
-	}
-	resp := &bridgev2.ResolveIdentifierResponse{
-		Ghost:    ghost,
-		UserID:   userID,
-		UserInfo: d.getUserInfo(ctx, user),
-		Context:  "@" + user.String(),
-	}
-	if createChat {
-		ch := d.existingDMChannel(user.ID)
-		if ch == nil {
-			ch, err = d.Session.UserChannelCreate(user.ID)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create DM: %w", err)
-			}
-		}
-		resp.Chat, err = d.chatResponseForChannel(ctx, ch)
-		if err != nil {
-			return nil, err
-		}
-	} else if ch := d.existingDMChannel(user.ID); ch != nil {
-		resp.Chat = &bridgev2.CreateChatResponse{PortalKey: d.portalKeyForChannel(ch)}
-	}
-	return resp, nil
-}
-
-func (d *DiscordClient) ResolveIdentifier(ctx context.Context, identifier string, createChat bool) (*bridgev2.ResolveIdentifierResponse, error) {
-	if d.Session == nil {
-		return nil, bridgev2.ErrNotLoggedIn
-	}
-	parsed, ok := parseIdentifier(identifier)
-	if !ok {
-		return nil, fmt.Errorf("empty identifier")
-	}
-	var user *discordgo.User
-	if parsed.ID != "" {
-		user = d.userCache.Resolve(ctx, parsed.ID)
-	} else {
-		// Discord has no username lookup for arbitrary users, so only friends
-		// and users seen in this session can be found by name.
-		user = findUserByUsername(d.friendList(), d.userCache.Snapshot(), parsed.Username)
-	}
-	if user == nil {
-		return nil, nil
-	}
-	return d.resolveUserResponse(ctx, user, createChat)
-}
-
-func (d *DiscordClient) GetContactList(ctx context.Context) ([]*bridgev2.ResolveIdentifierResponse, error) {
-	if d.Session == nil {
-		return nil, bridgev2.ErrNotLoggedIn
-	}
-	return d.usersToResponses(ctx, d.friendList())
-}
-
-func (d *DiscordClient) SearchUsers(ctx context.Context, query string) ([]*bridgev2.ResolveIdentifierResponse, error) {
-	if d.Session == nil {
-		return nil, bridgev2.ErrNotLoggedIn
-	}
-	selfID := discordid.ParseUserID(discordid.UserLoginIDToUserID(d.UserLogin.ID))
-	return d.usersToResponses(ctx, searchUsers(d.friendList(), d.userCache.Snapshot(), query, selfID))
-}
-
-func (d *DiscordClient) usersToResponses(ctx context.Context, users []*discordgo.User) ([]*bridgev2.ResolveIdentifierResponse, error) {
-	out := make([]*bridgev2.ResolveIdentifierResponse, 0, len(users))
-	for _, u := range users {
-		resp, err := d.resolveUserResponse(ctx, u, false)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, resp)
-	}
-	return out, nil
-}
-
 func (d *DiscordClient) CreateGroup(ctx context.Context, params *bridgev2.GroupCreateParams) (*bridgev2.CreateChatResponse, error) {
 	if d.Session == nil {
 		return nil, bridgev2.ErrNotLoggedIn
 	}
-	selfID := discordid.ParseUserID(discordid.UserLoginIDToUserID(d.UserLogin.ID))
+	selfID := discordid.ParseUserLoginID(d.UserLogin.ID)
 	req, err := newGroupDMRequest(params.Participants, selfID)
 	if err != nil {
 		return nil, err
@@ -332,5 +299,15 @@ func (d *DiscordClient) CreateGroup(ctx context.Context, params *bridgev2.GroupC
 			ch = *edited
 		}
 	}
-	return d.chatResponseForChannel(ctx, &ch)
+	if err = d.Session.State.ChannelAdd(&ch); err != nil {
+		zerolog.Ctx(ctx).Warn().Err(err).Msg("Failed to add new group DM to state")
+	}
+	info, err := d.getChannelChatInfo(ctx, &ch)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chat info: %w", err)
+	}
+	return &bridgev2.CreateChatResponse{
+		PortalKey:  d.portalKeyForChannel(&ch),
+		PortalInfo: info,
+	}, nil
 }

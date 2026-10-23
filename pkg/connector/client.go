@@ -33,13 +33,12 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/coder/websocket"
 	"github.com/rs/zerolog"
+	"go.mau.fi/util/exmaps"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/bridgev2/status"
 	"maunium.net/go/mautrix/event"
-
-	"go.mau.fi/util/exmaps"
 
 	"go.mau.fi/mautrix-discord/pkg/discordauth"
 	"go.mau.fi/mautrix-discord/pkg/discordid"
@@ -184,7 +183,7 @@ func (d *DiscordClient) Connect(ctx context.Context) {
 
 	d.markedOpened = make(map[string]time.Time)
 
-	d.connectRetrying(ctx, 0)
+	d.connectRetrying(ctx, 0, nil)
 }
 
 func vitalsErrorCode(v *vitals) (code status.BridgeStateErrorCode) {
@@ -282,11 +281,17 @@ func (d *DiscordClient) tokenInvalidated(ctx context.Context, circumstance strin
 	}
 }
 
-func (d *DiscordClient) connectRetrying(ctx context.Context, retryCount int) {
+func (d *DiscordClient) connectRetrying(ctx context.Context, retryCount int, prevStop *context.CancelFunc) {
 	retryCtx, cancel := context.WithCancel(ctx)
-	oldStop := d.stopConnecting.Swap(&cancel)
-	if oldStop != nil {
-		(*oldStop)()
+	if prevStop == nil {
+		oldStop := d.stopConnecting.Swap(&cancel)
+		if oldStop != nil {
+			(*oldStop)()
+		}
+	} else if !d.stopConnecting.CompareAndSwap(prevStop, &cancel) {
+		// Disconnect (or a new connect) took over while we were sleeping between attempts.
+		cancel()
+		return
 	}
 
 	log := zerolog.Ctx(ctx).With().Int("retry_count", retryCount).Logger()
@@ -304,7 +309,18 @@ func (d *DiscordClient) connectRetrying(ctx context.Context, retryCount int) {
 		return
 	}
 
+	if retryCtx.Err() != nil {
+		log.Debug().Msg("Was told to stop connecting")
+		return
+	}
 	err := d.connect(ctx)
+	if err == nil && retryCtx.Err() != nil && d.stopConnecting.Load() == nil {
+		// Disconnect ran while Open was in progress, so its Close may have come too early.
+		// A newer connect attempt shares the session, so only close if nothing replaced us.
+		log.Debug().Msg("Disconnected while opening session, closing it again")
+		_ = d.Session.Close()
+		return
+	}
 	if err != nil {
 		log.Err(err).Msg("Couldn't connect to Discord")
 
@@ -332,7 +348,7 @@ func (d *DiscordClient) connectRetrying(ctx context.Context, retryCount int) {
 				log.Debug().Msg("Was told to stop connecting")
 				return
 			}
-			d.connectRetrying(ctx, retryCount+1)
+			d.connectRetrying(ctx, retryCount+1, &cancel)
 		} else {
 			d.UserLogin.BridgeState.Send(status.BridgeState{
 				StateEvent: status.StateUnknownError,
@@ -1078,20 +1094,22 @@ func (d *DiscordClient) computeMutedUntil(muted bool, cfg *discordgo.MuteConfig)
 //
 // This method works with private channels if an empty string is passed as the
 // guild ID.
-func (d *DiscordClient) channelMutedUntil(guildID string, channelID string) time.Time {
+func (d *DiscordClient) channelMutedUntil(guildID, parentID, channelID string) time.Time {
 	settings := d.guildSettingsForGuildID(guildID)
 	if settings == nil {
 		return bridgev2.Unmuted
 	}
 
+	mutedUntil := d.computeMutedUntil(settings.Muted, settings.MuteConfig)
 	// TODO: Might be worth speeding this up via map.
 	for _, override := range settings.ChannelOverrides {
-		if override.ChannelID == channelID {
-			return d.computeMutedUntil(override.Muted, override.MuteConfig)
+		if override.ChannelID == channelID || override.ChannelID == parentID {
+			if overrideMutedUntil := d.computeMutedUntil(override.Muted, override.MuteConfig); overrideMutedUntil.After(mutedUntil) {
+				mutedUntil = overrideMutedUntil
+			}
 		}
 	}
-
-	return d.computeMutedUntil(settings.Muted, settings.MuteConfig)
+	return mutedUntil
 }
 
 func (d *DiscordClient) guildSettingsForGuildID(guildID string) *discordgo.UserGuildSettings {

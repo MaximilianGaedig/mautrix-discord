@@ -27,13 +27,12 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/rs/zerolog"
 	"go.mau.fi/util/exmaps"
+	"go.mau.fi/util/variationselector"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/bridgev2/networkid"
 	"maunium.net/go/mautrix/bridgev2/simplevent"
 	"maunium.net/go/mautrix/event"
-
-	"go.mau.fi/util/variationselector"
 
 	"go.mau.fi/mautrix-discord/pkg/discordid"
 	"go.mau.fi/mautrix-discord/pkg/msgconv"
@@ -125,31 +124,66 @@ func (m *DiscordMessage) ConvertEdit(
 		}
 	}
 
+	var textPart, firstMediaPart *bridgev2.ConvertedMessagePart
+	var firstMediaDBPart *database.Message
 	var addedParts []*bridgev2.ConvertedMessagePart
 	for _, part := range newlyConverted.Parts {
-		dbPart, ok := beforePartsByID[part.ID]
-		if !ok {
-			// Part ID is new, so it's being added.
-			addedParts = append(addedParts, part)
+		if part.ID == "" {
+			textPart = part
 			continue
 		}
-
-		// TODO(skip): Stash the edited timestamp of messages so we can
-		// actually discern between link previews/embeds and the message text
-		// actually being edited. As is, this will always replace the message
-		// body.
-		if part.ID == "" {
-			edit.ModifiedParts = append(edit.ModifiedParts, part.ToEditPart(dbPart))
+		dbPart, ok := beforePartsByID[part.ID]
+		if !ok {
+			addedParts = append(addedParts, part)
+		} else if firstMediaPart == nil && part.Content.MsgType.IsMedia() {
+			firstMediaPart = part
+			firstMediaDBPart = dbPart
 		}
 	}
+
+	// TODO(skip): Stash the edited timestamp of messages so we can
+	// actually discern between link previews/embeds and the message text
+	// actually being edited. As is, this will always replace the message
+	// body.
+	dbTextPart, hasDBTextPart := beforePartsByID[""]
+	// Discord can't add attachments in edits, so a single new attachment on a
+	// message stored as one text part (e.g. sent from Matrix) is that part.
+	replaceTextPart := hasDBTextPart && len(addedParts) == 1 &&
+		(textPart == nil || (len(existingParts) == 1 && m.hasAttachment(addedParts[0].ID)))
+	switch {
+	case replaceTextPart:
+		log.Debug().
+			Str("new_part_id", string(addedParts[0].ID)).
+			Msg("Replacing text part with new part in place")
+		edit.DeletedParts = slices.DeleteFunc(edit.DeletedParts, func(part *database.Message) bool {
+			return part == dbTextPart
+		})
+		dbTextPart.PartID = addedParts[0].ID
+		edit.ModifiedParts = append(edit.ModifiedParts, bridgev2.MergeCaption(textPart, addedParts[0]).ToEditPart(dbTextPart))
+		addedParts = nil
+	case textPart != nil && hasDBTextPart:
+		edit.ModifiedParts = append(edit.ModifiedParts, textPart.ToEditPart(dbTextPart))
+	case textPart != nil && firstMediaPart != nil:
+		log.Debug().
+			Str("media_part_id", string(firstMediaPart.ID)).
+			Msg("Adding text to existing media part as caption")
+		edit.ModifiedParts = append(edit.ModifiedParts, bridgev2.MergeCaption(textPart, firstMediaPart).ToEditPart(firstMediaDBPart))
+	case textPart != nil:
+		log.Debug().Msg("Ignoring text part in edit of message without text or media parts")
+	}
 	if len(addedParts) > 0 {
-		edit.AddedParts = &bridgev2.ConvertedMessage{
-			Parts:      addedParts,
-			ThreadRoot: newlyConverted.ThreadRoot,
-		}
+		log.Debug().
+			Int("added_part_count", len(addedParts)).
+			Msg("Ignoring parts added in edit")
 	}
 
 	return edit, nil
+}
+
+func (m *DiscordMessage) hasAttachment(partID networkid.PartID) bool {
+	return slices.ContainsFunc(m.Data.Attachments, func(att *discordgo.MessageAttachment) bool {
+		return discordid.MakePartID(att.ID) == partID
+	})
 }
 
 // isLegacyNumericParts reports whether the existing parts on a message were
@@ -404,6 +438,7 @@ func (d *DiscordClient) handleChannelCreate(ctx context.Context, ch *discordgo.C
 
 	if ch.GuildID == "" {
 		log.Debug().Msg("Private channel was created, creating portal")
+		d.queueChannelResync(ctx, ch.Channel)
 	} else {
 		if !d.shouldBridgeChannel(ctx, ch.Channel) {
 			log.Debug().Msg("Ignoring creation of guild channel that should not be bridged")
@@ -411,28 +446,33 @@ func (d *DiscordClient) handleChannelCreate(ctx context.Context, ch *discordgo.C
 		}
 
 		log.Debug().Msg("Guild channel was created")
+		d.bridgeGuildChannel(ctx, ch.Channel)
+	}
 
-		// If the newly created channel is under a category, ensure that the
-		// corresponding parent space exists first, so m.bridge is correct.
-		if ch.ParentID != "" {
-			parentCh := d.channelWithID(ctx, ch.ParentID)
-			if parentCh == nil {
-				log.Error().Msg("Newly created guild channel has a parent channel, but it's not present in cache; dropping!")
-				return nil
-			}
-			log.Debug().Msg("Ensuring parent space for the newly created channel")
-			err := d.ensurePortal(ctx, d.portalKeyForChannel(parentCh), nil)
-			if err != nil {
-				log.Err(err).Msg("Failed to ensure category space, dropping!")
-				return nil
-			}
+	return nil
+}
+
+func (d *DiscordClient) bridgeGuildChannel(ctx context.Context, ch *discordgo.Channel) {
+	log := zerolog.Ctx(ctx)
+
+	// If the channel is under a category, ensure that the corresponding parent
+	// space exists first, so m.bridge is correct.
+	if ch.ParentID != "" {
+		parentCh := d.channelWithID(ctx, ch.ParentID)
+		if parentCh == nil {
+			log.Error().Msg("Guild channel has a parent channel, but it's not present in cache; dropping!")
+			return
+		}
+		log.Debug().Msg("Ensuring parent space for the guild channel")
+		err := d.ensurePortal(ctx, d.portalKeyForChannel(parentCh), nil)
+		if err != nil {
+			log.Err(err).Msg("Failed to ensure category space, dropping!")
+			return
 		}
 	}
 
 	// This creates the portal.
-	d.queueChannelResync(ctx, ch.Channel)
-
-	return nil
+	d.queueChannelResync(ctx, ch)
 }
 
 func (d *DiscordClient) handleChannelUpdate(ctx context.Context, upd *discordgo.ChannelUpdate) error {
@@ -824,7 +864,7 @@ func (d *DiscordClient) handleDiscordStateEvent(rawEvt any) {
 	}
 }
 
-func (d *DiscordClient) handleRelationshipNickChange(ctx context.Context, userID, nickname string) {
+func (d *DiscordClient) handleRelationshipChange(ctx context.Context, userID, nickname string) {
 	ch := d.dmChannelForUserID(userID)
 	if ch == nil {
 		return
@@ -833,7 +873,7 @@ func (d *DiscordClient) handleRelationshipNickChange(ctx context.Context, userID
 	portalKey := d.portalKeyForChannel(ch)
 	portal, err := d.connector.Bridge.GetExistingPortalByKey(ctx, portalKey)
 	if err != nil {
-		zerolog.Ctx(ctx).Err(err).Msg("Failed to look up DM portal for relationship nick change")
+		zerolog.Ctx(ctx).Err(err).Msg("Failed to look up DM portal for relationship change")
 		return
 	}
 	if portal == nil || portal.MXID == "" {
@@ -847,6 +887,8 @@ func (d *DiscordClient) handleRelationshipNickChange(ctx context.Context, userID
 		name = bridgev2.DefaultChatName
 	}
 
+	rel := d.relationshipWithUserID(userID)
+	blocked := rel != nil && rel.Type == discordgo.RelationshipBlocked
 	d.UserLogin.QueueRemoteEvent(&simplevent.ChatInfoChange{
 		EventMeta: simplevent.EventMeta{
 			Type:      bridgev2.RemoteEventChatInfoChange,
@@ -855,7 +897,8 @@ func (d *DiscordClient) handleRelationshipNickChange(ctx context.Context, userID
 		},
 		ChatInfoChange: &bridgev2.ChatInfoChange{
 			ChatInfo: &bridgev2.ChatInfo{
-				Name: name,
+				Name:        name,
+				UserBlocked: &blocked,
 			},
 		},
 	})
@@ -1050,6 +1093,14 @@ func (d *DiscordClient) handleDiscordEvent(rawEvt any) {
 		ctx, log := messageCtx(ctx, evt.Message)
 		inBridgedChannel, route := d.channelIsBridged(ctx, evt.ChannelID)
 		isDM := route != nil && route.FromChannel != nil && channelIsPrivate(route.FromChannel)
+		if !inBridgedChannel && !isDM && route != nil {
+			portalCh := d.channelWithID(ctx, route.PortalChannelID)
+			if d.shouldBridgeChannel(ctx, portalCh) {
+				log.Debug().Str("portal_channel_id", portalCh.ID).Msg("Creating portal for guild channel that became visible")
+				d.bridgeGuildChannel(ctx, portalCh)
+				inBridgedChannel = true
+			}
+		}
 		if !inBridgedChannel && !isDM {
 			if d.connector.Config.LogWhenDroppingMessages {
 				log.Debug().
@@ -1193,14 +1244,11 @@ func (d *DiscordClient) handleDiscordEvent(rawEvt any) {
 	// coherence in the face of concurrency, because this method is always
 	// dispatched on a new goroutine.
 	case *discordgo.RelationshipAdd:
-		d.mirrorRelationshipBlock(ctx, evt.Relationship)
-		d.handleRelationshipNickChange(ctx, evt.ID, evt.Nickname)
+		d.handleRelationshipChange(ctx, evt.ID, evt.Nickname)
 	case *discordgo.RelationshipUpdate:
-		d.mirrorRelationshipBlock(ctx, evt.Relationship)
-		d.handleRelationshipNickChange(ctx, evt.ID, evt.Nickname)
+		d.handleRelationshipChange(ctx, evt.ID, evt.Nickname)
 	case *discordgo.RelationshipRemove:
-		d.mirrorRelationshipRemoved(ctx, evt.ID)
-		d.handleRelationshipNickChange(ctx, evt.ID, "")
+		d.handleRelationshipChange(ctx, evt.ID, "")
 	case *discordgo.PresenceUpdate:
 		d.handlePresenceUpdate(ctx, evt)
 	case *discordgo.MessageAck:
