@@ -23,7 +23,6 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"go.mau.fi/util/ffmpeg"
 	"maunium.net/go/mautrix/bridgev2"
-	"maunium.net/go/mautrix/bridgev2/database"
 	"maunium.net/go/mautrix/event"
 
 	"go.mau.fi/mautrix-discord/pkg/discordid"
