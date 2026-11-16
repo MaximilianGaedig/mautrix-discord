@@ -93,3 +93,8 @@ proxy_login_remoteauth: true
 # message content, or attachment data are never incorporated into the reported
 # information.
 report_scrubbed_account_standing: false
+
+# When direct_media is enabled in the bridge config, should attachments of newly bridged messages
+# use it? With false they are still copied to the homeserver, and the direct media endpoint only
+# serves media IDs handed out some other way (for example to a homeserver that dropped its copies).
+direct_media_new_messages: true

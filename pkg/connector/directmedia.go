@@ -52,7 +52,7 @@ func (d *DiscordConnector) Download(
 }
 
 func (d *DiscordConnector) SetUseDirectMedia() {
-	d.MsgConv.DirectMedia = true
+	d.MsgConv.DirectMedia = d.Config.DirectMediaNewMessagesEnabled()
 }
 
 func (d *DiscordConnector) downloadAttachment(

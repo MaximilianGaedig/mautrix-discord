@@ -77,6 +77,13 @@ type Config struct {
 
 	ReportScrubbedAccountStanding bool `yaml:"report_scrubbed_account_standing"`
 
+	// DirectMediaNewMessages controls whether attachments of newly bridged messages use
+	// direct media when the bridge's direct_media is enabled. With it off, new attachments are
+	// still copied to the homeserver and the direct media endpoint only serves media IDs handed
+	// out some other way (a homeserver fetching attachments whose local copies were dropped).
+	// Defaults to true, which is upstream's behaviour.
+	DirectMediaNewMessages *bool `yaml:"direct_media_new_messages"`
+
 	channelNameTemplate *template.Template `yaml:"-"`
 }
 
@@ -160,6 +167,10 @@ func (c Config) PerMessageProfilesEnabled() bool {
 	return c.PerMessageProfiles != nil && *c.PerMessageProfiles
 }
 
+func (c Config) DirectMediaNewMessagesEnabled() bool {
+	return c.DirectMediaNewMessages == nil || *c.DirectMediaNewMessages
+}
+
 func upgradeConfig(helper up.Helper) {
 	helper.Copy(up.List, "guilds", "bridging_guild_ids")
 	helper.Copy(up.Bool, "guilds", "guild_avatars_in_rooms")
@@ -176,6 +187,7 @@ func upgradeConfig(helper up.Helper) {
 	helper.Copy(up.Bool, "proxy_login_machine")
 	helper.Copy(up.Bool, "proxy_login_remoteauth")
 	helper.Copy(up.Bool, "report_scrubbed_account_standing")
+	helper.Copy(up.Bool, "direct_media_new_messages")
 }
 
 func (d *DiscordConnector) GetConfig() (example string, data any, upgrader up.Upgrader) {
